@@ -121,3 +121,9 @@ pikaboard/
         └── Flutter/
             └── Pikafish.xcconfig       # Static library linkage config
 ```
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
+
+This project uses [Pikafish](https://github.com/official-pikafish/Pikafish), which is licensed under GPL-3.0. The NNUE network file (`pikafish.nnue`) is licensed under a **non-commercial** clause — see the [Pikafish repository](https://github.com/official-pikafish/Pikafish) for details.
