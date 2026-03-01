@@ -1,0 +1,3 @@
+[submodule "Pikafish"]
+	path = Pikafish
+	url = git@github.com:official-pikafish/Pikafish.git

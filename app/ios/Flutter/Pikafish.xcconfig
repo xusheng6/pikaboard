@@ -1,0 +1,7 @@
+// Pikafish engine static library linkage
+PIKAFISH_ROOT = $(SRCROOT)/../../
+
+HEADER_SEARCH_PATHS = $(inherited) $(PIKAFISH_ROOT)/pikafish_bridge
+
+// Use -force_load to ensure all symbols (including C bridge functions) are included
+OTHER_LDFLAGS = $(inherited) -force_load $(PIKAFISH_ROOT)/build/ios-sim/libpikafish.a -lc++

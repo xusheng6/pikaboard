@@ -1,0 +1,9 @@
+# Build artifacts
+build/
+.DS_Store
+
+# NNUE weights (too large for git, download separately)
+app/assets/pikafish.nnue
+
+# Pikafish source (added as submodule)
+# Pikafish/
