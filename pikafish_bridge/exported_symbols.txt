@@ -1,0 +1,10 @@
+_pikafish_init
+_pikafish_destroy
+_pikafish_set_info_callback
+_pikafish_set_bestmove_callback
+_pikafish_set_position
+_pikafish_go_depth
+_pikafish_go_infinite
+_pikafish_stop
+_pikafish_wait
+_pikafish_set_option

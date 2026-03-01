@@ -3,5 +3,7 @@ PIKAFISH_ROOT = $(SRCROOT)/../../
 
 HEADER_SEARCH_PATHS = $(inherited) $(PIKAFISH_ROOT)/pikafish_bridge
 
-// Use -force_load to ensure all symbols (including C bridge functions) are included
-OTHER_LDFLAGS = $(inherited) -force_load $(PIKAFISH_ROOT)/build/ios-sim/libpikafish.a -lc++
+// Use -force_load to ensure all symbols are included, and -exported_symbols_list to prevent stripping
+PIKAFISH_EXPORTS = $(PIKAFISH_ROOT)/pikafish_bridge/exported_symbols.txt
+OTHER_LDFLAGS[sdk=iphoneos*] = $(inherited) -force_load $(PIKAFISH_ROOT)/build/ios-arm64/libpikafish.a -lc++ -Wl,-exported_symbols_list,$(PIKAFISH_EXPORTS)
+OTHER_LDFLAGS[sdk=iphonesimulator*] = $(inherited) -force_load $(PIKAFISH_ROOT)/build/ios-sim/libpikafish.a -lc++ -Wl,-exported_symbols_list,$(PIKAFISH_EXPORTS)
