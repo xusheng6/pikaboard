@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../formats/game_export.dart';
 import '../models/game.dart';
 import '../models/move_notation.dart';
 import '../models/settings.dart';
@@ -57,6 +58,20 @@ class _NotesPanelState extends State<NotesPanel> {
     return 'After ${node.moveNumber}${node.isRedMove ? '.' : '...'} $notation';
   }
 
+  /// Drop a diagram marker at the cursor; exports draw the board there.
+  void _insertBoardMarker() {
+    final selection = _controller.selection;
+    final text = _controller.text;
+    final at = selection.isValid ? selection.start : text.length;
+    final end = selection.isValid ? selection.end : text.length;
+    final updated = text.replaceRange(at, end, kBoardMarker);
+    _controller.value = TextEditingValue(
+      text: updated,
+      selection: TextSelection.collapsed(offset: at + kBoardMarker.length),
+    );
+    widget.onChanged(updated);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -74,6 +89,14 @@ class _NotesPanelState extends State<NotesPanel> {
                 ),
               ),
               const Spacer(),
+              TextButton.icon(
+                onPressed: _insertBoardMarker,
+                icon: const Icon(Icons.grid_on, size: 16),
+                label: const Text('Diagram'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
               if (widget.node.comment.isNotEmpty)
                 IconButton(
                   onPressed: () {

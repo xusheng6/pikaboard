@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../formats/game_export.dart';
 import '../formats/game_io.dart';
 import '../engine/pikafish_engine.dart';
 import '../engine/search_info.dart';
@@ -713,7 +714,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     if (path == null) return;
 
     try {
-      final game = await GameIO.load(path);
+      final game = await GameIO.load(path, language: widget.settings.language);
       if (!mounted) return;
       if (_isAnalyzing) _stopAnalysis();
       setState(() {
@@ -757,6 +758,132 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+    }
+  }
+
+  /// Write the game out as readable text or as HTML with board diagrams.
+  Future<void> _exportGame(bool asHtml) async {
+    final base = GameIO.suggestedFileName(
+      _game,
+    ).replaceAll('.${GameIO.nativeExtension}', '');
+    final extension = asHtml ? 'html' : 'txt';
+    final path = await FilePicker.saveFile(
+      dialogTitle: asHtml ? 'Export HTML' : 'Export text',
+      fileName: '$base.$extension',
+      type: FileType.custom,
+      allowedExtensions: [extension],
+    );
+    if (path == null) return;
+
+    final content = asHtml
+        ? GameExport.toHtml(_game, language: widget.settings.language)
+        : GameExport.toText(_game, language: widget.settings.language);
+    try {
+      await File(
+        path.contains('.') ? path : '$path.$extension',
+      ).writeAsString(content, flush: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Exported ${path.split('/').last}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not export: $e')));
+    }
+  }
+
+  /// Show and edit the game's title, players and result.
+  Future<void> _editGameInfo() async {
+    final metadata = _game.metadata.copy();
+    final controllers = {
+      'Title': TextEditingController(text: metadata.title),
+      'Event': TextEditingController(text: metadata.event),
+      'Site': TextEditingController(text: metadata.site),
+      'Date': TextEditingController(text: metadata.date),
+      'Red': TextEditingController(text: metadata.red),
+      'Black': TextEditingController(text: metadata.black),
+      'Annotator': TextEditingController(text: metadata.annotator),
+    };
+    var result = metadata.result;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Game information'),
+        content: SingleChildScrollView(
+          child: StatefulBuilder(
+            builder: (context, setDialogState) => Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final entry in controllers.entries)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: TextField(
+                      controller: entry.value,
+                      decoration: InputDecoration(
+                        labelText: entry.key,
+                        isDense: true,
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<GameResult>(
+                  initialValue: result,
+                  decoration: const InputDecoration(
+                    labelText: 'Result',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    for (final value in GameResult.values)
+                      DropdownMenuItem(
+                        value: value,
+                        child: Text(GameExport.resultText(value)),
+                      ),
+                  ],
+                  onChanged: (value) => setDialogState(
+                    () => result = value ?? GameResult.unknown,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    for (final controller in controllers.values) {
+      if (saved == true) continue;
+      controller.dispose();
+    }
+    if (saved != true) return;
+
+    setState(() {
+      _game.metadata
+        ..title = controllers['Title']!.text
+        ..event = controllers['Event']!.text
+        ..site = controllers['Site']!.text
+        ..date = controllers['Date']!.text
+        ..red = controllers['Red']!.text
+        ..black = controllers['Black']!.text
+        ..annotator = controllers['Annotator']!.text
+        ..result = result;
+    });
+    for (final controller in controllers.values) {
+      controller.dispose();
     }
   }
 
@@ -1068,6 +1195,27 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         onPressed: _saveGameFile,
                         icon: const Icon(Icons.save_outlined, size: 18),
                         tooltip: 'Save game',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.ios_share, size: 18),
+                        tooltip: 'Export',
+                        onSelected: (choice) => _exportGame(choice == 'html'),
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(
+                            value: 'txt',
+                            child: Text('Export text…'),
+                          ),
+                          PopupMenuItem(
+                            value: 'html',
+                            child: Text('Export HTML with diagrams…'),
+                          ),
+                        ],
+                      ),
+                      IconButton(
+                        onPressed: _editGameInfo,
+                        icon: const Icon(Icons.info_outline, size: 18),
+                        tooltip: 'Game information',
                         visualDensity: VisualDensity.compact,
                       ),
                       TextButton.icon(

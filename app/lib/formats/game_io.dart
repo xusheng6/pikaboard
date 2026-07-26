@@ -3,7 +3,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../models/game.dart';
+import '../models/settings.dart';
 import 'xqf.dart';
+import 'xqg.dart';
 
 /// Loading and saving games.
 ///
@@ -19,17 +21,25 @@ class GameIO {
   static const List<String> readableExtensions = [
     'xqf',
     nativeExtension,
+    'xqg',
     'json',
   ];
 
-  static Future<Game> load(String path) async {
+  static Future<Game> load(
+    String path, {
+    DisplayLanguage language = DisplayLanguage.simplified,
+  }) async {
     final bytes = await File(path).readAsBytes();
-    return decode(bytes, path: path);
+    return decode(bytes, path: path, language: language);
   }
 
   /// Parse [bytes], choosing the format by content rather than by extension so
   /// oddly-named files still open.
-  static Game decode(Uint8List bytes, {String path = ''}) {
+  static Game decode(
+    Uint8List bytes, {
+    String path = '',
+    DisplayLanguage language = DisplayLanguage.simplified,
+  }) {
     if (XqfFormat.looksLikeXqf(bytes)) return XqfFormat.parse(bytes);
 
     final Object? json;
@@ -42,6 +52,9 @@ class GameIO {
       throw const FormatException('Game file is not an object');
     }
     if (json['format'] == Game.formatId) return Game.fromJson(json);
+    if (XqgFormat.looksLikeXqg(json)) {
+      return XqgFormat.parse(json, language: language);
+    }
     throw FormatException('Unsupported game format: ${json['format']}');
   }
 
