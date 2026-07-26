@@ -55,8 +55,7 @@ class FfiBackend implements EngineBackend {
     _infoCallable = NativeCallable<PikafishInfoCallbackNative>.listener(
       _onInfoCallback,
     );
-    _bestmoveCallable =
-        NativeCallable<PikafishBestmoveCallbackNative>.listener(
+    _bestmoveCallable = NativeCallable<PikafishBestmoveCallbackNative>.listener(
       _onBestmoveCallback,
     );
 
@@ -182,10 +181,7 @@ class FfiBackend implements EngineBackend {
     final bestmove = bestmovePtr.cast<Utf8>().toDartString();
     final ponder = ponderPtr.cast<Utf8>().toDartString();
 
-    final bm = BestMove(
-      move: bestmove,
-      ponder: ponder.isEmpty ? null : ponder,
-    );
+    final bm = BestMove(move: bestmove, ponder: ponder.isEmpty ? null : ponder);
 
     _instance?._bestMoveController.add(bm);
   }

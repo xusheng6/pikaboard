@@ -121,7 +121,11 @@ class Position {
     if (uci.length < 2) return null;
     final file = uci.codeUnitAt(0) - 'a'.codeUnitAt(0);
     final rank = int.tryParse(uci.substring(1));
-    if (rank == null || file < 0 || file >= files || rank < 0 || rank >= ranks) {
+    if (rank == null ||
+        file < 0 ||
+        file >= files ||
+        rank < 0 ||
+        rank >= ranks) {
       return null;
     }
     return rank * files + file;

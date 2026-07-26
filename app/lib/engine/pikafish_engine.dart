@@ -46,8 +46,7 @@ class PikafishEngine {
 
   void stop() => _backend.stop();
 
-  void setOption(String name, String value) =>
-      _backend.setOption(name, value);
+  void setOption(String name, String value) => _backend.setOption(name, value);
 
   void dispose() => _backend.dispose();
 }
