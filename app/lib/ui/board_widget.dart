@@ -14,6 +14,10 @@ class BoardWidget extends StatelessWidget {
   /// Squares of the opponent's best reply (the ponder move), shown in blue.
   final int? ponderFrom;
   final int? ponderTo;
+
+  /// Draw the board rotated 180°, i.e. seen from Black's side. Purely a view
+  /// setting: the position, and therefore every square index, is unchanged.
+  final bool viewFromBlack;
   final ValueChanged<int>? onSquareTap;
   final DisplayLanguage language;
 
@@ -27,6 +31,7 @@ class BoardWidget extends StatelessWidget {
     this.lastMoveTo,
     this.ponderFrom,
     this.ponderTo,
+    this.viewFromBlack = false,
     this.onSquareTap,
     this.language = DisplayLanguage.simplified,
   });
@@ -65,8 +70,11 @@ class BoardWidget extends StatelessWidget {
     double cellH,
     double pieceSize,
   ) {
-    // Display: rank 9 at top (y=0), rank 0 at bottom
-    final displayRow = Position.ranks - 1 - rank;
+    // Display: rank 9 at top (y=0), rank 0 at bottom — or the 180° rotation of
+    // that when viewing from Black's side. The grid itself is symmetric, so
+    // only the pieces need repositioning.
+    final displayRow = viewFromBlack ? rank : Position.ranks - 1 - rank;
+    final displayCol = viewFromBlack ? Position.files - 1 - file : file;
     final square = rank * Position.files + file;
     final piece = position.pieceAt(square);
     final isSelected = selectedSquare == square;
@@ -78,7 +86,7 @@ class BoardWidget extends StatelessWidget {
     final isPonderTo = ponderTo == square;
 
     return Positioned(
-      left: file * cellW,
+      left: displayCol * cellW,
       top: displayRow * cellH,
       width: cellW,
       height: cellH,

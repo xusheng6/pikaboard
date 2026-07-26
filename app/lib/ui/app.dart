@@ -112,6 +112,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   bool _isSetupMode = false;
   PieceColor _setupColor = PieceColor.red;
 
+  // View-only board rotation; leaves the position untouched.
+  bool _viewFromBlack = false;
+
   BestMove? _latestBestMove;
 
   // The position the engine is currently searching. Search output is tied to
@@ -796,6 +799,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         ponderTo: settings.highlightPonderMove
                             ? _ponderMoveTo
                             : null,
+                        viewFromBlack: _viewFromBlack,
                         onSquareTap: _onSquareTap,
                         language: settings.language,
                       ),
@@ -886,6 +890,22 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         onPressed: () => _transformPosition((p) => p.flipped()),
                         icon: const Icon(Icons.swap_vert, size: 20),
                         tooltip: 'Flip up-down and swap sides',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      // View-only rotation — the position is untouched.
+                      IconButton(
+                        onPressed: () =>
+                            setState(() => _viewFromBlack = !_viewFromBlack),
+                        icon: Icon(
+                          Icons.rotate_left,
+                          size: 20,
+                          color: _viewFromBlack
+                              ? Theme.of(context).colorScheme.primary
+                              : null,
+                        ),
+                        tooltip: _viewFromBlack
+                            ? "View from Red's side"
+                            : "View from Black's side",
                         visualDensity: VisualDensity.compact,
                       ),
                       const SizedBox(width: 4),

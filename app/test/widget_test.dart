@@ -495,6 +495,32 @@ void main() {
       expect(ringsOf(tester, Colors.blue.shade700), 2);
     });
 
+    testWidgets('viewFromBlack rotates the drawing, not the position', (
+      tester,
+    ) async {
+      final start = Position.startPosition();
+
+      Future<Offset> kingOffset({required bool flipped}) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: BoardWidget(position: start, viewFromBlack: flipped),
+            ),
+          ),
+        );
+        return tester.getCenter(find.text('帅')); // red king, on e0
+      }
+
+      final normal = await kingOffset(flipped: false);
+      final rotated = await kingOffset(flipped: true);
+      // Red's king moves from the bottom of the board to the top ...
+      expect(rotated.dy, lessThan(normal.dy));
+      // ... and the files mirror with it, though e is the centre file so its
+      // x stays put. Check a corner piece instead.
+      final leftRook = tester.getCenter(find.text('车').first);
+      expect(leftRook.dx, greaterThan(normal.dx));
+    });
+
     testWidgets('omitted squares draw no highlight', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
