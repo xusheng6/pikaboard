@@ -32,9 +32,8 @@ class SearchInfo {
       return 'M${scoreMate! > 0 ? '+' : ''}$scoreMate';
     }
     if (scoreCp != null) {
-      final v = scoreCp! / 100.0;
-      final sign = v >= 0 ? '+' : '';
-      return '$sign${v.toStringAsFixed(2)}';
+      final sign = scoreCp! >= 0 ? '+' : '';
+      return '$sign$scoreCp';
     }
     return '?';
   }
