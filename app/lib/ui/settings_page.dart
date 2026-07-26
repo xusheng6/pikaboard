@@ -76,13 +76,15 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           SwitchListTile(
             title: const Text('Best move'),
-            subtitle: const Text("Green — engine's move for the side to move"),
+            subtitle: const Text(
+              "Arrow 1 — engine's move for the side to move",
+            ),
             value: _current.highlightBestMove,
             onChanged: (v) => _apply(_current.copyWith(highlightBestMove: v)),
           ),
           SwitchListTile(
             title: const Text('Best reply (ponder)'),
-            subtitle: const Text("Blue — opponent's best answer to it"),
+            subtitle: const Text("Arrow 2 — opponent's best answer to it"),
             value: _current.highlightPonderMove,
             onChanged: (v) => _apply(_current.copyWith(highlightPonderMove: v)),
           ),

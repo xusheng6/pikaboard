@@ -193,6 +193,36 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   int? get _ponderMoveFrom => _uciSquare(_ponderUci, 0);
   int? get _ponderMoveTo => _uciSquare(_ponderUci, 2);
 
+  /// The engine's line as numbered board arrows: "1" is the move it wants to
+  /// play now, "2" the reply it expects. Each is drawn in the colour of the
+  /// side playing it, and either can be switched off in settings.
+  List<BoardArrow> get _boardArrows {
+    final sideToMove = (_enginePosition ?? _position).sideToMove;
+    final opponent = sideToMove == PieceColor.red
+        ? PieceColor.black
+        : PieceColor.red;
+    return [
+      if (widget.settings.highlightBestMove &&
+          _bestMoveFrom != null &&
+          _bestMoveTo != null)
+        BoardArrow(
+          from: _bestMoveFrom!,
+          to: _bestMoveTo!,
+          side: sideToMove,
+          label: '1',
+        ),
+      if (widget.settings.highlightPonderMove &&
+          _ponderMoveFrom != null &&
+          _ponderMoveTo != null)
+        BoardArrow(
+          from: _ponderMoveFrom!,
+          to: _ponderMoveTo!,
+          side: opponent,
+          label: '2',
+        ),
+    ];
+  }
+
   /// True when the engine's output describes the position currently shown.
   bool get _engineMatchesBoard =>
       _enginePosition != null && _enginePosition!.toFen() == _position.toFen();
@@ -779,26 +809,15 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                       child: BoardWidget(
                         position: _position,
                         selectedSquare: _selectedSquare,
-                        // Each highlight is independently switchable in
-                        // settings; when off the squares are simply not passed.
-                        highlightFrom: settings.highlightBestMove
-                            ? _bestMoveFrom
-                            : null,
-                        highlightTo: settings.highlightBestMove
-                            ? _bestMoveTo
-                            : null,
+                        // Each indicator is independently switchable in
+                        // settings; when off it is simply not passed.
                         lastMoveFrom: settings.highlightLastMove
                             ? _lastMoveFrom
                             : null,
                         lastMoveTo: settings.highlightLastMove
                             ? _lastMoveTo
                             : null,
-                        ponderFrom: settings.highlightPonderMove
-                            ? _ponderMoveFrom
-                            : null,
-                        ponderTo: settings.highlightPonderMove
-                            ? _ponderMoveTo
-                            : null,
+                        arrows: _boardArrows,
                         viewFromBlack: _viewFromBlack,
                         onSquareTap: _onSquareTap,
                         language: settings.language,

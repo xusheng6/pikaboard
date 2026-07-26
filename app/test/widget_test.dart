@@ -478,51 +478,83 @@ void main() {
       }).length;
     }
 
-    testWidgets('best move is green and the ponder reply blue', (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: BoardWidget(
-              position: Position.startPosition(),
-              // b0 holds a knight, c2 is empty; likewise b9 and c7.
-              highlightFrom: 1,
-              highlightTo: 20,
-              ponderFrom: 82,
-              ponderTo: 65,
-            ),
-          ),
-        ),
-      );
-      expect(marksOf(tester, Colors.green.shade600), 2);
-      expect(marksOf(tester, Colors.blue.shade600), 2);
-    });
-
-    testWidgets('occupied squares get a ring, empty ones only a dot', (
-      tester,
-    ) async {
+    testWidgets('the last move played gets a ring or a dot', (tester) async {
       final start = Position.startPosition();
 
       Future<Size> markSize(int square) async {
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
-              body: BoardWidget(position: start, highlightFrom: square),
+              body: BoardWidget(position: start, lastMoveFrom: square),
             ),
           ),
         );
-        final mark = find.byWidgetPredicate((w) {
-          final d = w is Container ? w.decoration : null;
-          return d is BoxDecoration &&
-              (d.border?.top.color == Colors.green.shade600 ||
-                  d.color == Colors.green.shade600);
-        });
-        return tester.getSize(mark);
+        return tester.getSize(
+          find.byWidgetPredicate((w) {
+            final d = w is Container ? w.decoration : null;
+            return d is BoxDecoration &&
+                (d.border?.top.color == Colors.amber.shade700 ||
+                    d.color == Colors.amber.shade700);
+          }),
+        );
       }
 
       final onPiece = await markSize(1); // b0, a knight
       final onEmpty = await markSize(20); // c2, empty
       // The dot is well inside the piece; the ring hugs its edge.
       expect(onEmpty.width, lessThan(onPiece.width / 2));
+    });
+
+    /// The arrows are painted rather than built, so they are located by their
+    /// painter instead of by widget type.
+    int arrowLayers(WidgetTester tester) => tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .where((c) => c.painter.runtimeType.toString() == '_ArrowPainter')
+        .length;
+
+    testWidgets('engine moves are drawn as numbered arrows', (tester) async {
+      const arrows = [
+        BoardArrow(from: 1, to: 20, side: PieceColor.red, label: '1'),
+        BoardArrow(from: 82, to: 65, side: PieceColor.black, label: '2'),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BoardWidget(
+              position: Position.startPosition(),
+              arrows: arrows,
+              lastMoveFrom: 3,
+            ),
+          ),
+        ),
+      );
+
+      expect(arrowLayers(tester), 1);
+      // The last-move marker is still a widget of its own ...
+      expect(marksOf(tester, Colors.amber.shade700), 1);
+      // ... while the engine moves no longer add square markers.
+      expect(marksOf(tester, Colors.green.shade600), 0);
+      expect(marksOf(tester, Colors.blue.shade600), 0);
+    });
+
+    testWidgets('arrow equality drives repaints', (tester) async {
+      const a = BoardArrow(from: 1, to: 20, side: PieceColor.red, label: '1');
+      expect(
+        a,
+        const BoardArrow(from: 1, to: 20, side: PieceColor.red, label: '1'),
+      );
+      expect(
+        a,
+        isNot(
+          const BoardArrow(from: 1, to: 20, side: PieceColor.black, label: '1'),
+        ),
+      );
+      expect(
+        a,
+        isNot(
+          const BoardArrow(from: 1, to: 20, side: PieceColor.red, label: '2'),
+        ),
+      );
     });
 
     testWidgets('viewFromBlack rotates the drawing, not the position', (
@@ -551,14 +583,14 @@ void main() {
       expect(leftRook.dx, greaterThan(normal.dx));
     });
 
-    testWidgets('omitted squares draw no highlight', (tester) async {
+    testWidgets('a bare board draws no indicators at all', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(body: BoardWidget(position: Position.startPosition())),
         ),
       );
-      expect(marksOf(tester, Colors.green.shade600), 0);
-      expect(marksOf(tester, Colors.blue.shade600), 0);
+      expect(marksOf(tester, Colors.amber.shade700), 0);
+      expect(arrowLayers(tester), 0);
     });
   });
 

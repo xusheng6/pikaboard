@@ -1,19 +1,47 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/piece.dart';
 import '../models/position.dart';
 import '../models/settings.dart';
 
+/// A move drawn over the board as an arrow, numbered by its place in the
+/// engine's line: "1" is the move to play now, "2" the expected reply.
+///
+/// [side] is the colour that plays the move and decides how it is drawn.
+@immutable
+class BoardArrow {
+  final int from;
+  final int to;
+  final PieceColor side;
+  final String label;
+
+  const BoardArrow({
+    required this.from,
+    required this.to,
+    required this.side,
+    required this.label,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      other is BoardArrow &&
+      other.from == from &&
+      other.to == to &&
+      other.side == side &&
+      other.label == label;
+
+  @override
+  int get hashCode => Object.hash(from, to, side, label);
+}
+
 class BoardWidget extends StatelessWidget {
   final Position position;
   final int? selectedSquare;
-  final int? highlightFrom;
-  final int? highlightTo;
   final int? lastMoveFrom;
   final int? lastMoveTo;
 
-  /// Squares of the opponent's best reply (the ponder move), shown in blue.
-  final int? ponderFrom;
-  final int? ponderTo;
+  /// Engine moves to draw as numbered arrows, in play order.
+  final List<BoardArrow> arrows;
 
   /// Draw the board rotated 180°, i.e. seen from Black's side. Purely a view
   /// setting: the position, and therefore every square index, is unchanged.
@@ -25,12 +53,9 @@ class BoardWidget extends StatelessWidget {
     super.key,
     required this.position,
     this.selectedSquare,
-    this.highlightFrom,
-    this.highlightTo,
     this.lastMoveFrom,
     this.lastMoveTo,
-    this.ponderFrom,
-    this.ponderTo,
+    this.arrows = const [],
     this.viewFromBlack = false,
     this.onSquareTap,
     this.language = DisplayLanguage.simplified,
@@ -56,6 +81,19 @@ class BoardWidget extends StatelessWidget {
               for (int rank = 0; rank < Position.ranks; rank++)
                 for (int file = 0; file < Position.files; file++)
                   _buildSquare(rank, file, cellW, cellH, pieceSize),
+              // Engine arrows sit above the pieces so a move is readable even
+              // when both of its squares are occupied.
+              if (arrows.isNotEmpty)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _ArrowPainter(
+                        arrows: arrows,
+                        viewFromBlack: viewFromBlack,
+                      ),
+                    ),
+                  ),
+                ),
             ],
           );
         },
@@ -78,12 +116,8 @@ class BoardWidget extends StatelessWidget {
     final square = rank * Position.files + file;
     final piece = position.pieceAt(square);
     final isSelected = selectedSquare == square;
-    final isHighlightFrom = highlightFrom == square;
-    final isHighlightTo = highlightTo == square;
     final isLastFrom = lastMoveFrom == square;
     final isLastTo = lastMoveTo == square;
-    final isPonderFrom = ponderFrom == square;
-    final isPonderTo = ponderTo == square;
 
     return Positioned(
       left: displayCol * cellW,
@@ -97,14 +131,9 @@ class BoardWidget extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              // Move indicators, weakest first so the best move wins a square
-              // shared with another marker (e.g. a recapture).
+              // The move just played; engine moves are drawn as arrows instead.
               if (isLastFrom || isLastTo)
                 _marker(Colors.amber.shade700, pieceSize, piece != null),
-              if (isPonderFrom || isPonderTo)
-                _marker(Colors.blue.shade600, pieceSize, piece != null),
-              if (isHighlightFrom || isHighlightTo)
-                _marker(Colors.green.shade600, pieceSize, piece != null),
               // Piece
               if (piece != null)
                 _PieceWidget(
@@ -149,6 +178,123 @@ class BoardWidget extends StatelessWidget {
       decoration: BoxDecoration(shape: BoxShape.circle, color: color),
     );
   }
+}
+
+/// Draws the engine's line: a thin arrow per move, in the colour of the side
+/// playing it, ending in a numbered dot on the destination square.
+class _ArrowPainter extends CustomPainter {
+  final List<BoardArrow> arrows;
+  final bool viewFromBlack;
+
+  _ArrowPainter({required this.arrows, required this.viewFromBlack});
+
+  static const _red = Color(0xFFC62828);
+  static const _black = Color(0xFF212121);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cellW = size.width / Position.files;
+    final cellH = size.height / Position.ranks;
+    final seenDestinations = <int, int>{};
+
+    for (final arrow in arrows) {
+      final color = arrow.side == PieceColor.red ? _red : _black;
+      final from = _center(arrow.from, cellW, cellH);
+      final to = _center(arrow.to, cellW, cellH);
+      final direction = to - from;
+      if (direction.distance == 0) continue;
+      final unit = direction / direction.distance;
+
+      // When two moves end on the same square (a recapture, say) pull the
+      // later dot back along its own arrow so both numbers stay readable.
+      final duplicates = seenDestinations.update(
+        arrow.to,
+        (n) => n + 1,
+        ifAbsent: () => 0,
+      );
+      final dotCenter = to - unit * (cellW * 0.4 * duplicates);
+
+      _drawArrow(canvas, from, dotCenter, unit, color, cellW);
+      _drawDot(canvas, dotCenter, color, cellW, arrow.label);
+    }
+  }
+
+  Offset _center(int square, double cellW, double cellH) {
+    final rank = square ~/ Position.files;
+    final file = square % Position.files;
+    final row = viewFromBlack ? rank : Position.ranks - 1 - rank;
+    final col = viewFromBlack ? Position.files - 1 - file : file;
+    return Offset((col + 0.5) * cellW, (row + 0.5) * cellH);
+  }
+
+  void _drawArrow(
+    Canvas canvas,
+    Offset from,
+    Offset to,
+    Offset unit,
+    Color color,
+    double cellW,
+  ) {
+    // Start clear of the moving piece and stop at the edge of the dot.
+    final start = from + unit * (cellW * 0.36);
+    final end = to - unit * (cellW * 0.2);
+    if ((end - start).dx * unit.dx + (end - start).dy * unit.dy <= 0) return;
+
+    final headLength = cellW * 0.24;
+    final headBase = end - unit * headLength;
+    final paint = Paint()
+      ..color = color.withValues(alpha: 0.85)
+      ..strokeWidth = cellW * 0.07
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(start, headBase, paint);
+
+    final perpendicular = Offset(-unit.dy, unit.dx) * (headLength * 0.45);
+    final head = Path()
+      ..moveTo(end.dx, end.dy)
+      ..lineTo(headBase.dx + perpendicular.dx, headBase.dy + perpendicular.dy)
+      ..lineTo(headBase.dx - perpendicular.dx, headBase.dy - perpendicular.dy)
+      ..close();
+    canvas.drawPath(head, Paint()..color = color.withValues(alpha: 0.85));
+  }
+
+  void _drawDot(
+    Canvas canvas,
+    Offset center,
+    Color color,
+    double cellW,
+    String label,
+  ) {
+    final radius = cellW * 0.18;
+    canvas.drawCircle(center, radius, Paint()..color = color);
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2
+        ..color = Colors.white.withValues(alpha: 0.9),
+    );
+
+    final text = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: radius * 1.4,
+          fontWeight: FontWeight.bold,
+          height: 1.0,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    text.paint(canvas, center - Offset(text.width / 2, text.height / 2));
+  }
+
+  @override
+  bool shouldRepaint(covariant _ArrowPainter oldDelegate) =>
+      oldDelegate.viewFromBlack != viewFromBlack ||
+      !listEquals(oldDelegate.arrows, arrows);
 }
 
 class _PieceWidget extends StatelessWidget {
