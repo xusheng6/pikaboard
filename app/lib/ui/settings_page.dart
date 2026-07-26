@@ -56,6 +56,16 @@ class _SettingsPageState extends State<SettingsPage> {
               onTap: () => _apply(_current.copyWith(language: l)),
             ),
           const Divider(),
+          _sectionHeader(context, 'Engine'),
+          for (final count in const [1, 2, 3, 4, 5])
+            _choice(
+              label: count == 1
+                  ? 'Best line only'
+                  : 'Show $count lines (MultiPV)',
+              selected: _current.multiPv == count,
+              onTap: () => _apply(_current.copyWith(multiPv: count)),
+            ),
+          const Divider(),
           _sectionHeader(context, 'Rules'),
           SwitchListTile(
             title: const Text('Only allow legal moves'),

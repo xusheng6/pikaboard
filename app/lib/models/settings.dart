@@ -62,6 +62,9 @@ class Settings {
   /// Show a board preview when hovering a move in an engine line.
   final bool previewOnEngineLine;
 
+  /// How many lines the engine reports per iteration (UCI MultiPV).
+  final int multiPv;
+
   const Settings({
     this.theme = ThemeSetting.dark,
     this.language = DisplayLanguage.simplified,
@@ -74,6 +77,7 @@ class Settings {
     this.previewOnChart = true,
     this.previewOnMoveTree = true,
     this.previewOnEngineLine = true,
+    this.multiPv = 1,
   });
 
   Settings copyWith({
@@ -88,6 +92,7 @@ class Settings {
     bool? previewOnChart,
     bool? previewOnMoveTree,
     bool? previewOnEngineLine,
+    int? multiPv,
   }) {
     return Settings(
       theme: theme ?? this.theme,
@@ -101,6 +106,7 @@ class Settings {
       previewOnChart: previewOnChart ?? this.previewOnChart,
       previewOnMoveTree: previewOnMoveTree ?? this.previewOnMoveTree,
       previewOnEngineLine: previewOnEngineLine ?? this.previewOnEngineLine,
+      multiPv: multiPv ?? this.multiPv,
     );
   }
 
@@ -116,6 +122,7 @@ class Settings {
     'previewOnChart': previewOnChart,
     'previewOnMoveTree': previewOnMoveTree,
     'previewOnEngineLine': previewOnEngineLine,
+    'multiPv': multiPv,
   };
 
   factory Settings.fromJson(Map<String, dynamic> json) {
@@ -149,6 +156,9 @@ class Settings {
           json['previewOnMoveTree'] as bool? ?? d.previewOnMoveTree,
       previewOnEngineLine:
           json['previewOnEngineLine'] as bool? ?? d.previewOnEngineLine,
+      // Clamped: the engine accepts up to 128, but the panel is not the place
+      // to read a hundred lines.
+      multiPv: ((json['multiPv'] as num?)?.toInt() ?? d.multiPv).clamp(1, 8),
     );
   }
 }

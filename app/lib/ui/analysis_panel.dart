@@ -30,6 +30,7 @@ import 'hover_preview.dart';
 
 // Shared column widths so the header and every row line up. They are sized for
 // unscaled text, so run them through [_w] to follow the font-size setting.
+const double _kRankWidth = 20;
 const double _kDepthWidth = 46;
 const double _kScoreWidth = 64;
 const double _kTimeWidth = 54;
@@ -88,6 +89,9 @@ class AnalysisPanel extends StatelessWidget {
     this.viewFromBlack = false,
   });
 
+  /// True when the engine is reporting alternatives, so rows need numbering.
+  bool get showsRank => lines.any((line) => line.info.multiPV > 1);
+
   @override
   Widget build(BuildContext context) {
     if (lines.isEmpty && bestMove == null) {
@@ -113,7 +117,7 @@ class AnalysisPanel extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (lines.isNotEmpty) ...[
-                  const _HeaderRow(),
+                  _HeaderRow(showRank: showsRank),
                   const Divider(height: 8),
                   for (final line in lines)
                     _LineRow(
@@ -122,6 +126,7 @@ class AnalysisPanel extends StatelessWidget {
                       scorePerspective: scorePerspective,
                       showPreview: showPreview,
                       viewFromBlack: viewFromBlack,
+                      showRank: showsRank,
                     ),
                 ],
               ],
@@ -211,7 +216,10 @@ class _Stat extends StatelessWidget {
 }
 
 class _HeaderRow extends StatelessWidget {
-  const _HeaderRow();
+  /// Only shown when the engine is reporting more than one line.
+  final bool showRank;
+
+  const _HeaderRow({this.showRank = false});
 
   @override
   Widget build(BuildContext context) {
@@ -222,6 +230,13 @@ class _HeaderRow extends StatelessWidget {
     );
     return Row(
       children: [
+        if (showRank) ...[
+          SizedBox(
+            width: _w(context, _kRankWidth),
+            child: const Text('#', style: style),
+          ),
+          const SizedBox(width: _kColumnGap),
+        ],
         SizedBox(
           width: _w(context, _kDepthWidth),
           child: const Text(
@@ -256,6 +271,7 @@ class _LineRow extends StatelessWidget {
   final ScorePerspective scorePerspective;
   final bool showPreview;
   final bool viewFromBlack;
+  final bool showRank;
 
   const _LineRow({
     required this.line,
@@ -263,6 +279,7 @@ class _LineRow extends StatelessWidget {
     required this.scorePerspective,
     this.showPreview = true,
     this.viewFromBlack = false,
+    this.showRank = false,
   });
 
   @override
@@ -287,6 +304,24 @@ class _LineRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (showRank) ...[
+            SizedBox(
+              width: _w(context, _kRankWidth),
+              child: Text(
+                '${info.multiPV}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: info.multiPV == 1
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).hintColor,
+                  fontWeight: info.multiPV == 1
+                      ? FontWeight.bold
+                      : FontWeight.normal,
+                ),
+              ),
+            ),
+            const SizedBox(width: _kColumnGap),
+          ],
           SizedBox(
             width: _w(context, _kDepthWidth),
             child: Text(

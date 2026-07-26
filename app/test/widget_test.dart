@@ -271,6 +271,73 @@ void main() {
       expect(find.byType(Opacity), findsWidgets);
     });
 
+    testWidgets('MultiPV lines are numbered and kept in engine order', (
+      tester,
+    ) async {
+      final start = Position.startPosition();
+      SearchInfo line(int depth, int pv, String moves) => SearchInfo(
+        depth: depth,
+        selDepth: depth,
+        multiPV: pv,
+        scoreCp: 40 - pv * 10,
+        nodes: 1,
+        nps: 1,
+        timeMs: 1,
+        hashfull: 0,
+        pv: moves.split(' '),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AnalysisPanel(
+              lines: [
+                AnalysisLine(info: line(12, 1, 'h2e2'), position: start),
+                AnalysisLine(info: line(12, 2, 'b0c2'), position: start),
+                AnalysisLine(info: line(12, 3, 'h0g2'), position: start),
+              ],
+              position: start,
+              showPreview: false,
+            ),
+          ),
+        ),
+      );
+
+      // The rank column appears, numbering the alternatives ...
+      expect(find.text('#'), findsOneWidget);
+      expect(find.text('1'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
+      // ... and every line is shown rather than collapsing onto one depth.
+      expect(find.text('12'), findsNWidgets(3));
+      // Engine order is preserved down the table.
+      expect(
+        tester.getTopLeft(find.text('1')).dy,
+        lessThan(tester.getTopLeft(find.text('3')).dy),
+      );
+    });
+
+    testWidgets('a single-line search has no rank column', (tester) async {
+      final start = Position.startPosition();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AnalysisPanel(
+              lines: [
+                AnalysisLine(
+                  info: _line(12, pv: 'h2e2'),
+                  position: start,
+                ),
+              ],
+              position: start,
+              showPreview: false,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('#'), findsNothing);
+    });
+
     testWidgets('best move and search stats sit below the table', (
       tester,
     ) async {
@@ -325,6 +392,15 @@ void main() {
       expect(d.highlightLastMove, isTrue);
       expect(d.highlightBestMove, isTrue);
       expect(d.highlightPonderMove, isTrue);
+    });
+
+    test('the engine line count is kept, and kept sane', () {
+      expect(const Settings().multiPv, 1);
+      final round = Settings.fromJson(const Settings(multiPv: 4).toJson());
+      expect(round.multiPv, 4);
+      // A file asking for more lines than the panel can show is clamped.
+      expect(Settings.fromJson({'multiPv': 999}).multiPv, 8);
+      expect(Settings.fromJson({'multiPv': 0}).multiPv, 1);
     });
 
     test('json round-trip preserves the new fields', () {

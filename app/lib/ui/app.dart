@@ -161,9 +161,10 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   // stale once the board moves on.
   Position? _enginePosition;
 
-  // Current search lines, keyed by depth so each iteration collapses to one
-  // row (latest update per depth wins).
-  final Map<int, SearchInfo> _curByDepth = {};
+  // Current search lines, keyed by the iteration and the line number within
+  // it, so each row is the latest word on that line and MultiPV searches keep
+  // their alternatives apart instead of overwriting one another.
+  final Map<({int depth, int multiPv}), SearchInfo> _curLines = {};
 
   // Lines from the previous searched position, shown greyed below the current
   // ones until the next hard reset.
@@ -216,17 +217,21 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     // describe a previous position too.
     final curStale =
         enginePos == null || enginePos.toFen() != _position.toFen();
-    final cur =
-        (_curByDepth.values.toList()
-              ..sort((a, b) => b.depth.compareTo(a.depth)))
-            .map(
-              (info) => AnalysisLine(
-                info: info,
-                position: enginePos ?? _position,
-                stale: curStale,
-              ),
-            );
+    final cur = (_curLines.values.toList()..sort(_deepestFirst)).map(
+      (info) => AnalysisLine(
+        info: info,
+        position: enginePos ?? _position,
+        stale: curStale,
+      ),
+    );
     return [...cur, ..._staleLines];
+  }
+
+  /// Deepest iteration first, and within an iteration the engine's own
+  /// ordering: line 1 is the move it would play.
+  static int _deepestFirst(SearchInfo a, SearchInfo b) {
+    final byDepth = b.depth.compareTo(a.depth);
+    return byDepth != 0 ? byDepth : a.multiPV.compareTo(b.multiPV);
   }
 
   /// Remember [info]'s score for the position being searched, keeping the
@@ -253,9 +258,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   /// Send [pos] to the engine and start an infinite search, demoting the
   /// previous search's lines to the greyed stale list.
   void _startEngineSearch(Position pos) {
-    if (_curByDepth.isNotEmpty && _enginePosition != null) {
+    if (_curLines.isNotEmpty && _enginePosition != null) {
       _staleLines =
-          _curByDepth.values
+          _curLines.values
               .map(
                 (info) => AnalysisLine(
                   info: info,
@@ -264,10 +269,11 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                 ),
               )
               .toList()
-            ..sort((a, b) => b.info.depth.compareTo(a.info.depth));
+            ..sort((a, b) => _deepestFirst(a.info, b.info));
     }
-    _curByDepth.clear();
+    _curLines.clear();
     _enginePosition = pos;
+    _engine.setOption('MultiPV', '${widget.settings.multiPv}');
     _engine.setPosition(pos.toFen());
     _engine.goInfinite();
   }
@@ -379,12 +385,16 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         }
         setState(() {
           if (info.pv.isNotEmpty) {
-            _curByDepth[info.depth] = info;
-            // The PV's first two plies are the best move and the best reply.
-            _bestUci = info.pv.first;
-            _ponderUci = info.pv.length > 1 ? info.pv[1] : null;
+            _curLines[(depth: info.depth, multiPv: info.multiPV)] = info;
+            // Only the first line is the engine's actual choice, so the board
+            // arrows and the recorded score follow that one alone.
+            if (info.multiPV <= 1) {
+              // The PV's first two plies are the best move and the best reply.
+              _bestUci = info.pv.first;
+              _ponderUci = info.pv.length > 1 ? info.pv[1] : null;
+            }
           }
-          _recordEval(info);
+          if (info.multiPV <= 1) _recordEval(info);
         });
       });
       _bestMoveSub = _engine.bestMove.listen((bm) {
@@ -403,6 +413,16 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
           context,
         ).showSnackBar(SnackBar(content: Text('Engine init failed: $e')));
       }
+    }
+  }
+
+  @override
+  void didUpdateWidget(PikaboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A new line count only reaches the engine between searches, so restart
+    // one that is already running.
+    if (oldWidget.settings.multiPv != widget.settings.multiPv && _isAnalyzing) {
+      _restartSearch(_position);
     }
   }
 
@@ -653,7 +673,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     _fenController.text = _position.toFen();
     _selectedSquare = null;
     _latestBestMove = null;
-    _curByDepth.clear();
+    _curLines.clear();
     _staleLines = [];
     // A different game means a different graph.
     _evalByFen.clear();
@@ -779,7 +799,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _batchDone = 0;
       _batchTotal = nodes.length;
       _staleLines = [];
-      _curByDepth.clear();
+      _curLines.clear();
     });
 
     try {
@@ -787,11 +807,12 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         if (_batchCancelled || !mounted) break;
         setState(() {
           _current = node;
-          _curByDepth.clear();
+          _curLines.clear();
           _enginePosition = node.position;
           _updateLastMoveHighlight();
         });
 
+        _engine.setOption('MultiPV', '${widget.settings.multiPv}');
         _engine.setPosition(node.position.toFen());
         _engine.goInfinite();
         await Future<void>.delayed(Duration(seconds: seconds));
