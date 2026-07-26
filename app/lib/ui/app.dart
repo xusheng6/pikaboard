@@ -9,6 +9,7 @@ import '../models/settings.dart';
 import '../models/settings_store.dart';
 import 'board_widget.dart';
 import 'analysis_panel.dart';
+import 'candidate_moves.dart';
 import 'move_list.dart';
 import 'settings_page.dart';
 
@@ -348,6 +349,19 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _selectedSquare = null;
       _updateLastMoveHighlight();
       _restartAnalysisIfNeeded();
+    });
+  }
+
+  /// Play a move given in UCI form (e.g. from a cloud candidate).
+  void _playUci(String uci) {
+    if (_isSetupMode || uci.length < 4) return;
+    final from = Position.uciToSquare(uci.substring(0, 2));
+    final to = Position.uciToSquare(uci.substring(2, 4));
+    if (from == null || to == null) return;
+    if (_position.pieceAt(from) == null) return;
+    setState(() {
+      _makeMove(from, to);
+      _selectedSquare = null;
     });
   }
 
@@ -843,15 +857,27 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                   ),
                 if (_history.length > 1) const Divider(height: 1),
 
-                // Analysis output
+                // Cloud candidates + engine analysis (scroll together)
                 Expanded(
                   child: SingleChildScrollView(
-                    child: AnalysisPanel(
-                      lines: _analysisLines,
-                      bestMove: _latestBestMove,
-                      position: _enginePosition ?? _position,
-                      language: widget.settings.language,
-                      scorePerspective: widget.settings.scorePerspective,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CandidateMoves(
+                          position: _position,
+                          language: widget.settings.language,
+                          scorePerspective: widget.settings.scorePerspective,
+                          onPlay: _playUci,
+                        ),
+                        const Divider(height: 1),
+                        AnalysisPanel(
+                          lines: _analysisLines,
+                          bestMove: _latestBestMove,
+                          position: _enginePosition ?? _position,
+                          language: widget.settings.language,
+                          scorePerspective: widget.settings.scorePerspective,
+                        ),
+                      ],
                     ),
                   ),
                 ),

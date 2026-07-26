@@ -6,6 +6,7 @@ import 'package:app/models/move_notation.dart';
 import 'package:app/models/piece.dart';
 import 'package:app/models/position.dart';
 import 'package:app/models/settings.dart';
+import 'package:app/services/chessdb.dart';
 import 'package:app/ui/analysis_panel.dart';
 import 'package:app/ui/move_list.dart';
 
@@ -210,6 +211,28 @@ void main() {
         ),
       );
       expect(find.textContaining('Press Analyze'), findsOneWidget);
+    });
+  });
+
+  group('ChessDb parser', () {
+    test('parses queryall moves and sorts by score', () {
+      const body =
+          'move:h2e2,score:6,rank:2,winrate:49.3,note:! (6-00)|'
+          'move:b2e2,score:12,rank:2,winrate:52.8,note:! (12-00)';
+      final moves = ChessDb.parseResponse(body);
+      expect(moves.length, 2);
+      // Sorted best-first.
+      expect(moves.first.uci, 'b2e2');
+      expect(moves.first.score, 12);
+      expect(moves.first.winrate, 52.8);
+      expect(moves.first.note, contains('12-00'));
+    });
+
+    test('returns empty on error/unknown responses', () {
+      expect(ChessDb.parseResponse('unknown'), isEmpty);
+      expect(ChessDb.parseResponse('invalid board'), isEmpty);
+      expect(ChessDb.parseResponse('checkmate'), isEmpty);
+      expect(ChessDb.parseResponse(''), isEmpty);
     });
   });
 
