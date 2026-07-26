@@ -98,6 +98,8 @@ class AnalysisPanel extends StatelessWidget {
             const SizedBox(height: 6),
           ],
           if (lines.isNotEmpty) ...[
+            _statsRow(context),
+            const SizedBox(height: 4),
             const _HeaderRow(),
             const Divider(height: 8),
             for (final line in lines)
@@ -107,6 +109,57 @@ class AnalysisPanel extends StatelessWidget {
                 scorePerspective: scorePerspective,
               ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// The line used for the summary stats: the newest current-position line,
+  /// falling back to the newest line overall.
+  SearchInfo? _statsInfo() {
+    for (final l in lines) {
+      if (!l.stale) return l.info;
+    }
+    return lines.isEmpty ? null : lines.first.info;
+  }
+
+  Widget _statsRow(BuildContext context) {
+    final info = _statsInfo();
+    if (info == null) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 16,
+      runSpacing: 2,
+      children: [
+        _Stat('NPS', info.npsText),
+        _Stat('Nodes', info.nodesText),
+        _Stat('Hash', '${(info.hashfull / 10).toStringAsFixed(1)}%'),
+      ],
+    );
+  }
+}
+
+class _Stat extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _Stat(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    return RichText(
+      text: TextSpan(
+        style: const TextStyle(fontSize: 12),
+        children: [
+          TextSpan(
+            text: '$label ',
+            style: TextStyle(color: Theme.of(context).hintColor),
+          ),
+          TextSpan(
+            text: value,
+            style: DefaultTextStyle.of(
+              context,
+            ).style.copyWith(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
         ],
       ),
     );
