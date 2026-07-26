@@ -11,6 +11,11 @@ import 'search_info.dart';
 abstract class EngineBackend {
   Stream<SearchInfo> get searchInfo;
   Stream<BestMove> get bestMove;
+
+  /// The engine conversation as text: every line the engine prints plus the
+  /// commands sent to it (prefixed with `>`). Shown verbatim in the Raw tab.
+  Stream<String> get rawOutput;
+
   bool get isInitialized;
 
   Future<void> init();

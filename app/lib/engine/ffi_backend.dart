@@ -24,11 +24,22 @@ class FfiBackend implements EngineBackend {
 
   final _searchInfoController = StreamController<SearchInfo>.broadcast();
   final _bestMoveController = StreamController<BestMove>.broadcast();
+  final _rawController = StreamController<String>.broadcast();
 
   @override
   Stream<SearchInfo> get searchInfo => _searchInfoController.stream;
   @override
   Stream<BestMove> get bestMove => _bestMoveController.stream;
+
+  /// The bridge hands us parsed callbacks rather than the engine's stdout, so
+  /// the raw view is fed UCI lines rebuilt from that data.
+  @override
+  Stream<String> get rawOutput => _rawController.stream;
+
+  void _emitRaw(String line) {
+    if (!_rawController.isClosed) _rawController.add(line);
+  }
+
   @override
   bool get isInitialized => _initialized;
 
@@ -86,8 +97,11 @@ class FfiBackend implements EngineBackend {
   void setPosition(String fen, {List<String> moves = const []}) {
     if (!_initialized) return;
 
-    final fenPtr = fen.toNativeUtf8().cast<Char>();
     final movesStr = moves.join(' ');
+    _emitRaw(
+      '> position fen $fen${movesStr.isEmpty ? '' : ' moves $movesStr'}',
+    );
+    final fenPtr = fen.toNativeUtf8().cast<Char>();
     final movesPtr = movesStr.toNativeUtf8().cast<Char>();
 
     _bindings!.setPosition(fenPtr, movesPtr);
@@ -99,24 +113,28 @@ class FfiBackend implements EngineBackend {
   @override
   void goInfinite() {
     if (!_initialized) return;
+    _emitRaw('> go infinite');
     _bindings!.goInfinite();
   }
 
   @override
   void goDepth(int depth) {
     if (!_initialized) return;
+    _emitRaw('> go depth $depth');
     _bindings!.goDepth(depth);
   }
 
   @override
   void stop() {
     if (!_initialized) return;
+    _emitRaw('> stop');
     _bindings!.stop();
   }
 
   @override
   void setOption(String name, String value) {
     if (!_initialized && name != 'Threads' && name != 'Hash') return;
+    _emitRaw('> setoption name $name value $value');
     final namePtr = name.toNativeUtf8().cast<Char>();
     final valuePtr = value.toNativeUtf8().cast<Char>();
     _bindings!.setOption(namePtr, valuePtr);
@@ -136,6 +154,7 @@ class FfiBackend implements EngineBackend {
     _bestmoveCallable?.close();
     _searchInfoController.close();
     _bestMoveController.close();
+    _rawController.close();
   }
 
   static void _onInfoCallback(
@@ -172,6 +191,23 @@ class FfiBackend implements EngineBackend {
 
     // Since this is a listener callback, it's already on the Dart side
     _instance?._searchInfoController.add(info);
+    _instance?._emitRaw(_infoLine(info));
+  }
+
+  /// Rebuild the UCI `info` line the engine would have printed.
+  static String _infoLine(SearchInfo i) {
+    final score = i.scoreMate != null
+        ? 'mate ${i.scoreMate}'
+        : 'cp ${i.scoreCp ?? 0}';
+    final bound = i.isLowerbound
+        ? ' lowerbound'
+        : i.isUpperbound
+        ? ' upperbound'
+        : '';
+    return 'info depth ${i.depth} seldepth ${i.selDepth} '
+        'multipv ${i.multiPV} score $score$bound nodes ${i.nodes} '
+        'nps ${i.nps} hashfull ${i.hashfull} time ${i.timeMs} '
+        'pv ${i.pv.join(' ')}';
   }
 
   static void _onBestmoveCallback(
@@ -184,6 +220,9 @@ class FfiBackend implements EngineBackend {
     final bm = BestMove(move: bestmove, ponder: ponder.isEmpty ? null : ponder);
 
     _instance?._bestMoveController.add(bm);
+    _instance?._emitRaw(
+      'bestmove $bestmove${ponder.isEmpty ? '' : ' ponder $ponder'}',
+    );
   }
 
   // Static reference for routing native callbacks back to this instance.

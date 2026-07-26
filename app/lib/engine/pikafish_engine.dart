@@ -33,6 +33,7 @@ class PikafishEngine {
 
   Stream<SearchInfo> get searchInfo => _backend.searchInfo;
   Stream<BestMove> get bestMove => _backend.bestMove;
+  Stream<String> get rawOutput => _backend.rawOutput;
   bool get isInitialized => _backend.isInitialized;
 
   Future<void> init() => _backend.init();

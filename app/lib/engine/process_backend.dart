@@ -22,10 +22,15 @@ class ProcessBackend implements EngineBackend {
   // and for streaming search output.
   final _lineController = StreamController<String>.broadcast();
 
+  // The same lines plus the commands we send, for the raw output view.
+  final _rawController = StreamController<String>.broadcast();
+
   @override
   Stream<SearchInfo> get searchInfo => _searchInfoController.stream;
   @override
   Stream<BestMove> get bestMove => _bestMoveController.stream;
+  @override
+  Stream<String> get rawOutput => _rawController.stream;
   @override
   bool get isInitialized => _initialized;
 
@@ -53,7 +58,10 @@ class ProcessBackend implements EngineBackend {
     process.stderr
         .transform(utf8.decoder)
         .transform(const LineSplitter())
-        .listen((l) => debugPrint('[Pikafish stderr] $l'));
+        .listen((l) {
+          debugPrint('[Pikafish stderr] $l');
+          _emitRaw('[stderr] $l');
+        });
 
     // UCI handshake.
     _send('uci');
@@ -119,12 +127,18 @@ class ProcessBackend implements EngineBackend {
     _searchInfoController.close();
     _bestMoveController.close();
     _lineController.close();
+    _rawController.close();
   }
 
   // --- internals -----------------------------------------------------------
 
   void _send(String command) {
+    _emitRaw('> $command');
     _process?.stdin.writeln(command);
+  }
+
+  void _emitRaw(String line) {
+    if (!_rawController.isClosed) _rawController.add(line);
   }
 
   Future<void> _waitFor(bool Function(String) predicate) {
@@ -141,6 +155,7 @@ class ProcessBackend implements EngineBackend {
 
   void _onLine(String line) {
     if (!_lineController.isClosed) _lineController.add(line);
+    _emitRaw(line);
 
     if (line.startsWith('info ')) {
       final info = _parseInfo(line);

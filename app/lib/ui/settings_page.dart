@@ -56,6 +56,17 @@ class _SettingsPageState extends State<SettingsPage> {
               onTap: () => _apply(_current.copyWith(language: l)),
             ),
           const Divider(),
+          _sectionHeader(context, 'Rules'),
+          SwitchListTile(
+            title: const Text('Only allow legal moves'),
+            subtitle: const Text(
+              'Enforce Xiangqi movement rules on the board. '
+              'Setup mode is unaffected.',
+            ),
+            value: _current.enforceRules,
+            onChanged: (v) => _apply(_current.copyWith(enforceRules: v)),
+          ),
+          const Divider(),
           _sectionHeader(context, 'Board highlights'),
           SwitchListTile(
             title: const Text('Last move played'),

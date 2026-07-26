@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../engine/pikafish_engine.dart';
 import '../engine/search_info.dart';
+import '../models/move_rules.dart';
 import '../models/piece.dart';
 import '../models/position.dart';
 import '../models/settings.dart';
@@ -10,6 +11,7 @@ import '../models/settings_store.dart';
 import 'board_widget.dart';
 import 'analysis_panel.dart';
 import 'candidate_moves.dart';
+import 'engine_output.dart';
 import 'move_list.dart';
 import 'settings_page.dart';
 
@@ -93,6 +95,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   final _engine = PikafishEngine();
   final _fenController = TextEditingController();
 
+  // Everything the engine says, shown verbatim in the Raw tab.
+  final _engineLog = EngineLog();
+
   // Move history: list of positions from the starting position onward.
   // _historyIndex points to the currently displayed position.
   List<Position> _history = [];
@@ -167,6 +172,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
   StreamSubscription<SearchInfo>? _infoSub;
   StreamSubscription<BestMove>? _bestMoveSub;
+  StreamSubscription<String>? _rawSub;
 
   // Engine's best move and the opponent's best reply (the ponder move), in
   // UCI. Both come from the running search's PV and are refreshed by the final
@@ -213,6 +219,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
   Future<void> _initEngine() async {
     try {
+      // Subscribe first so the startup handshake shows up in the log too.
+      _rawSub = _engine.rawOutput.listen(_engineLog.add);
       await _engine.init();
       _infoSub = _engine.searchInfo.listen((info) {
         // Drop trailing output from a search that was stopped for a restart,
@@ -250,7 +258,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   void dispose() {
     _infoSub?.cancel();
     _bestMoveSub?.cancel();
+    _rawSub?.cancel();
     _engine.dispose();
+    _engineLog.dispose();
     _fenController.dispose();
     super.dispose();
   }
@@ -279,20 +289,28 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
           return;
         }
 
-        // Move piece
+        // Move piece. A move rejected as illegal keeps the piece selected so
+        // another destination can be tried.
         final piece = _position.pieceAt(_selectedSquare!);
-        if (piece != null) {
-          _makeMove(_selectedSquare!, square);
+        if (piece == null || _makeMove(_selectedSquare!, square)) {
+          _selectedSquare = null;
         }
-        _selectedSquare = null;
       }
     });
   }
 
-  /// Execute a move on the board, update history, and restart engine if analyzing.
-  void _makeMove(int from, int to) {
+  /// Execute a move on the board, update history, and restart engine if
+  /// analyzing. Returns false when the move was rejected as illegal.
+  bool _makeMove(int from, int to) {
     final piece = _position.pieceAt(from);
-    if (piece == null) return;
+    if (piece == null) return false;
+
+    // Setup mode edits the board freely, so the rules only apply to play.
+    if (widget.settings.enforceRules &&
+        !_isSetupMode &&
+        !MoveRules.isLegal(_position, from, to)) {
+      return false;
+    }
 
     final newPos = _position
         .withPiece(from, null)
@@ -335,6 +353,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _bestUci = null;
       _ponderUci = null;
     }
+    return true;
   }
 
   bool get _canGoBack => _historyIndex > 0;
@@ -920,13 +939,14 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                 // Engine analysis and cloud candidates in separate tabs
                 Expanded(
                   child: DefaultTabController(
-                    length: 2,
+                    length: 3,
                     child: Column(
                       children: [
                         const TabBar(
                           tabs: [
                             Tab(text: 'Engine'),
                             Tab(text: 'Cloud'),
+                            Tab(text: 'Raw'),
                           ],
                         ),
                         Expanded(
@@ -960,6 +980,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                                   onPlay: _playUci,
                                 ),
                               ),
+                              EngineOutputView(log: _engineLog),
                             ],
                           ),
                         ),

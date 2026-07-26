@@ -8,7 +8,9 @@ import 'package:app/models/position.dart';
 import 'package:app/models/settings.dart';
 import 'package:app/services/chessdb.dart';
 import 'package:app/ui/analysis_panel.dart';
+import 'package:app/models/move_rules.dart';
 import 'package:app/ui/board_widget.dart';
+import 'package:app/ui/engine_output.dart';
 import 'package:app/ui/move_list.dart';
 
 SearchInfo _line(int depth, {int scoreCp = 0, required String pv}) {
@@ -282,6 +284,122 @@ void main() {
     });
   });
 
+  group('Move rules', () {
+    /// Builds a position from a sparse map of UCI square -> FEN piece char.
+    Position board(
+      Map<String, String> pieces, {
+      PieceColor side = PieceColor.red,
+    }) {
+      var pos = Position.empty().withSideToMove(side);
+      pieces.forEach((square, fenChar) {
+        pos = pos.withPiece(
+          Position.uciToSquare(square)!,
+          Piece.fromFenChar(fenChar)!,
+        );
+      });
+      return pos;
+    }
+
+    bool legal(Position pos, String uci) => MoveRules.isLegal(
+      pos,
+      Position.uciToSquare(uci.substring(0, 2))!,
+      Position.uciToSquare(uci.substring(2))!,
+    );
+
+    test(
+      'opening knight and cannon moves are legal, backwards pawn is not',
+      () {
+        final start = Position.startPosition();
+        expect(legal(start, 'b0c2'), isTrue); // knight out
+        expect(legal(start, 'h2e2'), isTrue); // cannon to the centre file
+        expect(legal(start, 'a3a4'), isTrue); // pawn forward
+        expect(legal(start, 'a3b3'), isFalse); // no sideways before the river
+        expect(legal(start, 'a0a3'), isFalse); // rook blocked by its own pawn
+        expect(
+          legal(start, 'b9c7'),
+          isFalse,
+        ); // black may not move on red's turn
+      },
+    );
+
+    test('knight is blocked by a piece on its leg', () {
+      final blocked = board({'b0': 'N', 'b1': 'P'});
+      expect(legal(blocked, 'b0c2'), isFalse);
+      expect(legal(blocked, 'b0a2'), isFalse);
+      // Sideways-first L-shapes are unaffected by that blocker.
+      expect(legal(board({'b0': 'N'}), 'b0c2'), isTrue);
+    });
+
+    test('elephant needs a clear eye and may not cross the river', () {
+      expect(legal(board({'c0': 'B'}), 'c0e2'), isTrue);
+      expect(
+        legal(board({'c0': 'B', 'd1': 'P'}), 'c0e2'),
+        isFalse,
+      ); // eye blocked
+      expect(legal(board({'c4': 'B'}), 'c4e6'), isFalse); // would cross river
+    });
+
+    test('advisor and king stay inside the palace', () {
+      expect(legal(board({'d0': 'A'}), 'd0e1'), isTrue);
+      expect(legal(board({'d0': 'A'}), 'd0c1'), isFalse); // outside the palace
+      expect(legal(board({'e0': 'K'}), 'e0e1'), isTrue);
+      expect(legal(board({'e1': 'K'}), 'e1f1'), isTrue);
+      expect(legal(board({'e1': 'K'}), 'e1e1'), isFalse);
+      expect(legal(board({'f1': 'K'}), 'f1g1'), isFalse); // leaves the palace
+    });
+
+    test('cannon captures only over exactly one screen', () {
+      // Cannon on e0, screen on e4, black rook on e9.
+      final withScreen = board({'e0': 'C', 'e4': 'P', 'e9': 'r'});
+      expect(legal(withScreen, 'e0e9'), isTrue);
+      expect(legal(withScreen, 'e0e5'), isFalse); // empty square behind screen
+      // No screen: it may slide but not capture.
+      final noScreen = board({'e0': 'C', 'e9': 'r'});
+      expect(legal(noScreen, 'e0e5'), isTrue);
+      expect(legal(noScreen, 'e0e9'), isFalse);
+      // Two screens block the capture.
+      final twoScreens = board({'e0': 'C', 'e3': 'P', 'e4': 'p', 'e9': 'r'});
+      expect(legal(twoScreens, 'e0e9'), isFalse);
+    });
+
+    test('pawns move sideways only after crossing the river', () {
+      expect(legal(board({'a4': 'P'}), 'a4a5'), isTrue);
+      expect(legal(board({'a4': 'P'}), 'a4b4'), isFalse);
+      expect(legal(board({'a5': 'P'}), 'a5b5'), isTrue);
+      expect(legal(board({'a5': 'P'}), 'a5a4'), isFalse); // never backwards
+      final black = board({'a5': 'p'}, side: PieceColor.black);
+      expect(legal(black, 'a5a4'), isTrue);
+      expect(legal(black, 'a5a6'), isFalse);
+    });
+
+    test('a move may not expose or leave its own king in check', () {
+      // Black rook on e9 pins the red advisor on e1 against the king on e0.
+      final pinned = board({'e0': 'K', 'e1': 'A', 'e9': 'r'});
+      expect(legal(pinned, 'e1d2'), isFalse);
+      expect(MoveRules.isInCheck(pinned, PieceColor.red), isFalse);
+      // Removing the blocker leaves the king attacked.
+      final exposed = board({'e0': 'K', 'e9': 'r'});
+      expect(MoveRules.isInCheck(exposed, PieceColor.red), isTrue);
+    });
+
+    test('kings may not face each other down an open file', () {
+      // Red king e0, black king e9, one blocker between.
+      final blocked = board({'e0': 'K', 'e5': 'P', 'e9': 'k'});
+      expect(MoveRules.isInCheck(blocked, PieceColor.red), isFalse);
+      expect(legal(blocked, 'e5f5'), isFalse); // stepping aside opens the file
+      expect(legal(blocked, 'e5e6'), isTrue); // still on the file, still legal
+    });
+
+    test('legalDestinations lists every square a piece can reach', () {
+      final lone = board({'e5': 'R'});
+      // A rook alone on e5 reaches the whole file and rank: 9 + 8 squares.
+      expect(
+        MoveRules.legalDestinations(lone, Position.uciToSquare('e5')!).length,
+        17,
+      );
+    });
+  });
+
   group('BoardWidget highlights', () {
     /// Counts squares ringed in [color], the border used by the move
     /// highlights (pieces use red/black borders).
@@ -318,6 +436,63 @@ void main() {
       );
       expect(ringsOf(tester, Colors.green.shade700), 0);
       expect(ringsOf(tester, Colors.blue.shade700), 0);
+    });
+  });
+
+  group('Engine raw output', () {
+    test('the log keeps the newest lines once it overflows', () {
+      final log = EngineLog(maxLines: 10);
+      for (var i = 0; i < 600; i++) {
+        log.add('info depth $i');
+      }
+      expect(log.length, lessThanOrEqualTo(510));
+      expect(log.lines.last, 'info depth 599');
+      expect(log.droppedCount, greaterThan(0));
+      log.clear();
+      expect(log.length, 0);
+      expect(log.droppedCount, 0);
+      log.dispose();
+    });
+
+    testWidgets('renders lines newest-last and clears on demand', (
+      tester,
+    ) async {
+      final log = EngineLog()
+        ..add('> go infinite')
+        ..add('info depth 1 score cp 20 pv b0c2');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: EngineOutputView(log: log)),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.text('> go infinite'), findsOneWidget);
+      expect(find.textContaining('info depth 1'), findsOneWidget);
+      // Newest line sits below the older one.
+      expect(
+        tester.getTopLeft(find.textContaining('info depth 1')).dy,
+        greaterThan(tester.getTopLeft(find.text('> go infinite')).dy),
+      );
+
+      await tester.tap(find.byTooltip('Clear log'));
+      await tester.pump();
+      expect(find.textContaining('No engine output'), findsOneWidget);
+      log.dispose();
+    });
+
+    testWidgets('shows a placeholder while the engine is quiet', (
+      tester,
+    ) async {
+      final log = EngineLog();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: EngineOutputView(log: log)),
+        ),
+      );
+      expect(find.textContaining('No engine output'), findsOneWidget);
+      log.dispose();
     });
   });
 

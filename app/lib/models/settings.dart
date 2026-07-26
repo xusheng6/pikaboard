@@ -49,6 +49,10 @@ class Settings {
   /// Highlight the opponent's best reply to that move (the ponder move).
   final bool highlightPonderMove;
 
+  /// Reject moves that break the Xiangqi rules. Setup mode ignores this so
+  /// arbitrary positions can still be built.
+  final bool enforceRules;
+
   const Settings({
     this.theme = ThemeSetting.dark,
     this.language = DisplayLanguage.simplified,
@@ -57,6 +61,7 @@ class Settings {
     this.highlightLastMove = true,
     this.highlightBestMove = true,
     this.highlightPonderMove = true,
+    this.enforceRules = true,
   });
 
   Settings copyWith({
@@ -67,6 +72,7 @@ class Settings {
     bool? highlightLastMove,
     bool? highlightBestMove,
     bool? highlightPonderMove,
+    bool? enforceRules,
   }) {
     return Settings(
       theme: theme ?? this.theme,
@@ -76,6 +82,7 @@ class Settings {
       highlightLastMove: highlightLastMove ?? this.highlightLastMove,
       highlightBestMove: highlightBestMove ?? this.highlightBestMove,
       highlightPonderMove: highlightPonderMove ?? this.highlightPonderMove,
+      enforceRules: enforceRules ?? this.enforceRules,
     );
   }
 
@@ -87,6 +94,7 @@ class Settings {
     'highlightLastMove': highlightLastMove,
     'highlightBestMove': highlightBestMove,
     'highlightPonderMove': highlightPonderMove,
+    'enforceRules': enforceRules,
   };
 
   factory Settings.fromJson(Map<String, dynamic> json) {
@@ -114,6 +122,7 @@ class Settings {
           json['highlightBestMove'] as bool? ?? d.highlightBestMove,
       highlightPonderMove:
           json['highlightPonderMove'] as bool? ?? d.highlightPonderMove,
+      enforceRules: json['enforceRules'] as bool? ?? d.enforceRules,
     );
   }
 }
