@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/piece.dart';
 import '../models/position.dart';
+import '../models/settings.dart';
 
 class BoardWidget extends StatelessWidget {
   final Position position;
@@ -10,6 +11,7 @@ class BoardWidget extends StatelessWidget {
   final int? lastMoveFrom;
   final int? lastMoveTo;
   final ValueChanged<int>? onSquareTap;
+  final DisplayLanguage language;
 
   const BoardWidget({
     super.key,
@@ -20,6 +22,7 @@ class BoardWidget extends StatelessWidget {
     this.lastMoveFrom,
     this.lastMoveTo,
     this.onSquareTap,
+    this.language = DisplayLanguage.simplified,
   });
 
   @override
@@ -36,9 +39,7 @@ class BoardWidget extends StatelessWidget {
             children: [
               // Board background and grid
               Positioned.fill(
-                child: CustomPaint(
-                  painter: _BoardPainter(),
-                ),
+                child: CustomPaint(painter: _BoardPainter(language: language)),
               ),
               // Pieces and tap targets
               for (int rank = 0; rank < Position.ranks; rank++)
@@ -52,7 +53,12 @@ class BoardWidget extends StatelessWidget {
   }
 
   Widget _buildSquare(
-      int rank, int file, double cellW, double cellH, double pieceSize) {
+    int rank,
+    int file,
+    double cellW,
+    double cellH,
+    double pieceSize,
+  ) {
     // Display: rank 9 at top (y=0), rank 0 at bottom
     final displayRow = Position.ranks - 1 - rank;
     final square = rank * Position.files + file;
@@ -95,15 +101,20 @@ class BoardWidget extends StatelessWidget {
                     color: isHighlightFrom
                         ? Colors.green.withValues(alpha: 0.3)
                         : Colors.green.withValues(alpha: 0.4),
-                    border: Border.all(color: Colors.green.shade700, width: 2.5),
+                    border: Border.all(
+                      color: Colors.green.shade700,
+                      width: 2.5,
+                    ),
                   ),
                 ),
               // Piece
-              if (piece != null) _PieceWidget(
-                piece: piece,
-                size: pieceSize,
-                isSelected: isSelected,
-              ),
+              if (piece != null)
+                _PieceWidget(
+                  piece: piece,
+                  size: pieceSize,
+                  isSelected: isSelected,
+                  language: language,
+                ),
               // Selection ring (on top of piece)
               if (isSelected)
                 Container(
@@ -111,10 +122,7 @@ class BoardWidget extends StatelessWidget {
                   height: pieceSize + 4,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.orange.shade600,
-                      width: 3,
-                    ),
+                    border: Border.all(color: Colors.orange.shade600, width: 3),
                   ),
                 ),
               // Empty square highlight for best move destination
@@ -139,11 +147,13 @@ class _PieceWidget extends StatelessWidget {
   final Piece piece;
   final double size;
   final bool isSelected;
+  final DisplayLanguage language;
 
   const _PieceWidget({
     required this.piece,
     required this.size,
     this.isSelected = false,
+    required this.language,
   });
 
   @override
@@ -169,7 +179,7 @@ class _PieceWidget extends StatelessWidget {
       ),
       child: Center(
         child: Text(
-          piece.label,
+          piece.labelFor(language),
           style: TextStyle(
             fontSize: size * 0.55,
             fontWeight: FontWeight.bold,
@@ -183,6 +193,10 @@ class _PieceWidget extends StatelessWidget {
 }
 
 class _BoardPainter extends CustomPainter {
+  final DisplayLanguage language;
+
+  _BoardPainter({required this.language});
+
   @override
   void paint(Canvas canvas, Size size) {
     final cellW = size.width / 9;
@@ -249,10 +263,13 @@ class _BoardPainter extends CustomPainter {
     canvas.drawLine(Offset(cx(3), cy(7)), Offset(cx(5), cy(9)), linePaint);
     canvas.drawLine(Offset(cx(5), cy(7)), Offset(cx(3), cy(9)), linePaint);
 
-    // River text
+    // River text (traditional uses 漢; simplified and English use 汉)
+    final riverText = language == DisplayLanguage.traditional
+        ? '楚  河          漢  界'
+        : '楚  河          汉  界';
     final riverPaint = TextPainter(
       text: TextSpan(
-        text: '楚  河          汉  界',
+        text: riverText,
         style: TextStyle(
           fontSize: cellH * 0.45,
           color: Colors.black54,
@@ -272,5 +289,6 @@ class _BoardPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _BoardPainter oldDelegate) =>
+      oldDelegate.language != language;
 }

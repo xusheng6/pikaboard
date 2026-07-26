@@ -5,6 +5,7 @@ import 'package:app/engine/search_info.dart';
 import 'package:app/models/move_notation.dart';
 import 'package:app/models/piece.dart';
 import 'package:app/models/position.dart';
+import 'package:app/models/settings.dart';
 import 'package:app/ui/analysis_panel.dart';
 
 SearchInfo _line(int depth, {int scoreCp = 0, required String pv}) {
@@ -46,10 +47,47 @@ void main() {
 
     test('move notation uses simplified characters', () {
       final start = Position.startPosition();
-      final n = MoveNotation.toChinese('b0c2', start); // red knight advance
+      // red knight advance
+      final n = MoveNotation.toNotation(
+        'b0c2',
+        start,
+        DisplayLanguage.simplified,
+      );
       expect(n.contains('马'), isTrue, reason: 'got $n');
       expect(n.contains('进'), isTrue, reason: 'got $n');
       expect(n.contains('馬'), isFalse);
+    });
+  });
+
+  group('Display language', () {
+    test('piece labels vary by language', () {
+      const knight = Piece(PieceColor.red, PieceType.knight);
+      expect(knight.labelFor(DisplayLanguage.simplified), '马');
+      expect(knight.labelFor(DisplayLanguage.traditional), '馬');
+      expect(knight.labelFor(DisplayLanguage.english), 'H');
+    });
+
+    test('traditional notation uses traditional characters', () {
+      final start = Position.startPosition();
+      final n = MoveNotation.toNotation(
+        'b0c2',
+        start,
+        DisplayLanguage.traditional,
+      );
+      expect(n.contains('馬'), isTrue, reason: 'got $n');
+      expect(n.contains('進'), isTrue, reason: 'got $n');
+    });
+
+    test('english notation is the raw UCI move', () {
+      final start = Position.startPosition();
+      expect(
+        MoveNotation.toNotation('b0c2', start, DisplayLanguage.english),
+        'b0c2',
+      );
+      expect(
+        MoveNotation.pvToNotation('b0c2 b9c7', start, DisplayLanguage.english),
+        'b0c2 b9c7',
+      );
     });
   });
 

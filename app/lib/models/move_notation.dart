@@ -1,7 +1,8 @@
 import 'piece.dart';
 import 'position.dart';
+import 'settings.dart';
 
-/// Converts UCI moves to simplified Chinese Xiangqi notation.
+/// Converts UCI moves to Xiangqi move notation (Chinese or plain UCI).
 ///
 /// Red files are numbered 1-9 right-to-left (file i=1, file a=9) using 一二三四五六七八九.
 /// Black files are numbered 1-9 right-to-left (file i=1, file a=9) using 1-9.
@@ -15,12 +16,31 @@ import 'position.dart';
 /// When two identical pieces share the same file, 前/後 replaces the file number.
 class MoveNotation {
   static const _redNumerals = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
-  static const _blackNumerals = ['', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+  static const _blackNumerals = [
+    '',
+    '1',
+    '2',
+    '3',
+    '4',
+    '5',
+    '6',
+    '7',
+    '8',
+    '9',
+  ];
 
-  /// Convert a UCI move to Chinese notation given the current position.
+  /// Convert a UCI move to notation for [lang] given the current position.
+  /// English uses the raw UCI coordinates; Chinese uses full move notation.
   /// Returns the UCI move unchanged if conversion fails.
-  static String toChinese(String uci, Position position) {
+  static String toNotation(
+    String uci,
+    Position position,
+    DisplayLanguage lang,
+  ) {
+    if (lang == DisplayLanguage.english) return uci;
     if (uci.length < 4) return uci;
+    final back = lang == DisplayLanguage.traditional ? '後' : '后';
+    final advance = lang == DisplayLanguage.traditional ? '進' : '进';
 
     final from = Position.uciToSquare(uci.substring(0, 2));
     final to = Position.uciToSquare(uci.substring(2, 4));
@@ -42,7 +62,7 @@ class MoveNotation {
     int fileToNum(int file) => isRed ? (9 - file) : (file + 1);
 
     // Piece character
-    String pieceName = piece.label;
+    String pieceName = piece.labelFor(lang);
 
     // Check for duplicate pieces of same type and color on the same file
     String fileOrPosition = numerals[fileToNum(fromFile)];
@@ -53,9 +73,10 @@ class MoveNotation {
       final others = _findSameTypeOnFile(position, piece, fromFile);
       if (others.length == 2) {
         // Simple case: 2 pieces, use 前/後
-        final otherRank = others.firstWhere((sq) => sq != from) ~/ Position.files;
+        final otherRank =
+            others.firstWhere((sq) => sq != from) ~/ Position.files;
         final isFront = isRed ? (fromRank > otherRank) : (fromRank < otherRank);
-        fileOrPosition = isFront ? '前' : '后';
+        fileOrPosition = isFront ? '前' : back;
       } else {
         // 3+ identical pieces on the same file (e.g., 3 pawns)
         // Sort by rank: for Red, highest rank first (front); for Black, lowest rank first
@@ -66,12 +87,12 @@ class MoveNotation {
         });
         final index = others.indexOf(from);
         if (others.length == 3) {
-          fileOrPosition = ['前', '中', '后'][index];
+          fileOrPosition = ['前', '中', back][index];
         } else {
           // For 4-5 pawns, use ordinal numbers
           fileOrPosition = numerals[index + 1];
           // Replace piece name with file indicator
-          pieceName = piece.label;
+          pieceName = piece.labelFor(lang);
         }
       }
     }
@@ -87,7 +108,7 @@ class MoveNotation {
     } else {
       // Vertical or diagonal move
       final isAdvance = isRed ? (toRank > fromRank) : (toRank < fromRank);
-      action = isAdvance ? '进' : '退';
+      action = isAdvance ? advance : '退';
 
       // For pieces that move diagonally (Knight, Bishop, Advisor),
       // destination is the target file number.
@@ -105,18 +126,22 @@ class MoveNotation {
     return '$pieceName$fileOrPosition$action$destination';
   }
 
-  /// Convert a PV string (space-separated UCI moves) to Chinese notation.
+  /// Convert a PV string (space-separated UCI moves) to notation for [lang].
   /// Applies moves sequentially to track position changes.
-  static String pvToChinese(String pvText, Position startPosition) {
+  static String pvToNotation(
+    String pvText,
+    Position startPosition,
+    DisplayLanguage lang,
+  ) {
     if (pvText.trim().isEmpty) return '';
+    if (lang == DisplayLanguage.english) return pvText.trim();
 
     final moves = pvText.trim().split(RegExp(r'\s+'));
     final result = <String>[];
     var pos = startPosition;
 
     for (final uci in moves) {
-      final chinese = toChinese(uci, pos);
-      result.add(chinese);
+      result.add(toNotation(uci, pos, lang));
       // Apply the move to track position for subsequent moves
       pos = applyUciMove(pos, uci);
     }
@@ -124,11 +149,19 @@ class MoveNotation {
     return result.join(' ');
   }
 
-  static bool _hasDuplicateOnSameFile(Position position, Piece piece, int file) {
+  static bool _hasDuplicateOnSameFile(
+    Position position,
+    Piece piece,
+    int file,
+  ) {
     return _findSameTypeOnFile(position, piece, file).length > 1;
   }
 
-  static List<int> _findSameTypeOnFile(Position position, Piece piece, int file) {
+  static List<int> _findSameTypeOnFile(
+    Position position,
+    Piece piece,
+    int file,
+  ) {
     final result = <int>[];
     for (int rank = 0; rank < Position.ranks; rank++) {
       final sq = rank * Position.files + file;
@@ -152,7 +185,9 @@ class MoveNotation {
 
     final newPos = pos.withPiece(from, null).withPiece(to, piece);
     // Toggle side to move
-    final nextSide = pos.sideToMove == PieceColor.red ? PieceColor.black : PieceColor.red;
+    final nextSide = pos.sideToMove == PieceColor.red
+        ? PieceColor.black
+        : PieceColor.red;
     return newPos.withSideToMove(nextSide);
   }
 }

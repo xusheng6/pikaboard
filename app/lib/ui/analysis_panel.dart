@@ -3,6 +3,7 @@ import '../engine/search_info.dart';
 import '../models/move_notation.dart';
 import '../models/piece.dart';
 import '../models/position.dart';
+import '../models/settings.dart';
 
 /// Formats [info]'s score for display.
 ///
@@ -54,12 +55,16 @@ class AnalysisPanel extends StatelessWidget {
 
   /// Position the [bestMove] applies to.
   final Position position;
+  final DisplayLanguage language;
+  final ScorePerspective scorePerspective;
 
   const AnalysisPanel({
     super.key,
     this.lines = const [],
     this.bestMove,
     required this.position,
+    this.language = DisplayLanguage.simplified,
+    this.scorePerspective = ScorePerspective.red,
   });
 
   @override
@@ -82,8 +87,8 @@ class AnalysisPanel extends StatelessWidget {
         children: [
           if (bestMove != null) ...[
             Text(
-              'Best: ${MoveNotation.toChinese(bestMove!.move, position)}'
-              '${bestMove!.ponder != null ? '  Ponder: ${MoveNotation.toChinese(bestMove!.ponder!, MoveNotation.applyUciMove(position, bestMove!.move))}' : ''}',
+              'Best: ${MoveNotation.toNotation(bestMove!.move, position, language)}'
+              '${bestMove!.ponder != null ? '  Ponder: ${MoveNotation.toNotation(bestMove!.ponder!, MoveNotation.applyUciMove(position, bestMove!.move), language)}' : ''}',
               style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.bold,
@@ -95,7 +100,12 @@ class AnalysisPanel extends StatelessWidget {
           if (lines.isNotEmpty) ...[
             const _HeaderRow(),
             const Divider(height: 8),
-            for (final line in lines) _LineRow(line: line),
+            for (final line in lines)
+              _LineRow(
+                line: line,
+                language: language,
+                scorePerspective: scorePerspective,
+              ),
           ],
         ],
       ),
@@ -138,8 +148,14 @@ class _HeaderRow extends StatelessWidget {
 
 class _LineRow extends StatelessWidget {
   final AnalysisLine line;
+  final DisplayLanguage language;
+  final ScorePerspective scorePerspective;
 
-  const _LineRow({required this.line});
+  const _LineRow({
+    required this.line,
+    required this.language,
+    required this.scorePerspective,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -147,7 +163,7 @@ class _LineRow extends StatelessWidget {
     final score = formatScore(
       info,
       sideToMoveIsRed: line.position.sideToMove == PieceColor.red,
-      redPerspective: true,
+      redPerspective: scorePerspective == ScorePerspective.red,
     );
     final scoreColor = score.positive
         ? Colors.green.shade800
@@ -195,7 +211,7 @@ class _LineRow extends StatelessWidget {
           const SizedBox(width: _kColumnGap),
           Expanded(
             child: Text(
-              MoveNotation.pvToChinese(info.pvText, line.position),
+              MoveNotation.pvToNotation(info.pvText, line.position, language),
               style: const TextStyle(fontSize: 13),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,

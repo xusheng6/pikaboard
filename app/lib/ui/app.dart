@@ -3,14 +3,47 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../engine/pikafish_engine.dart';
 import '../engine/search_info.dart';
-import '../models/move_notation.dart';
 import '../models/piece.dart';
 import '../models/position.dart';
+import '../models/settings.dart';
+import '../models/settings_store.dart';
 import 'board_widget.dart';
 import 'analysis_panel.dart';
+import 'settings_page.dart';
 
-class PikaboardApp extends StatelessWidget {
+class PikaboardApp extends StatefulWidget {
   const PikaboardApp({super.key});
+
+  @override
+  State<PikaboardApp> createState() => _PikaboardAppState();
+}
+
+class _PikaboardAppState extends State<PikaboardApp> {
+  Settings _settings = const Settings();
+
+  @override
+  void initState() {
+    super.initState();
+    SettingsStore.load().then((s) {
+      if (mounted) setState(() => _settings = s);
+    });
+  }
+
+  void _update(Settings next) {
+    setState(() => _settings = next);
+    SettingsStore.save(next);
+  }
+
+  ThemeMode get _themeMode {
+    switch (_settings.theme) {
+      case ThemeSetting.light:
+        return ThemeMode.light;
+      case ThemeSetting.dark:
+        return ThemeMode.dark;
+      case ThemeSetting.auto:
+        return ThemeMode.system;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,15 +59,21 @@ class PikaboardApp extends StatelessWidget {
         brightness: Brightness.dark,
         useMaterial3: true,
       ),
-      // Dark is the default; a later setting will make this configurable.
-      themeMode: ThemeMode.dark,
-      home: const PikaboardScreen(),
+      themeMode: _themeMode,
+      home: PikaboardScreen(settings: _settings, onSettingsChanged: _update),
     );
   }
 }
 
 class PikaboardScreen extends StatefulWidget {
-  const PikaboardScreen({super.key});
+  final Settings settings;
+  final ValueChanged<Settings> onSettingsChanged;
+
+  const PikaboardScreen({
+    super.key,
+    required this.settings,
+    required this.onSettingsChanged,
+  });
 
   @override
   State<PikaboardScreen> createState() => _PikaboardScreenState();
@@ -477,6 +516,17 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     // _isAnalyzing will be set to false when bestmove callback fires
   }
 
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SettingsPage(
+          settings: widget.settings,
+          onChanged: widget.onSettingsChanged,
+        ),
+      ),
+    );
+  }
+
   void _resetPosition() {
     if (_isAnalyzing) _stopAnalysis();
     setState(() {
@@ -626,6 +676,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         lastMoveFrom: _lastMoveFrom,
                         lastMoveTo: _lastMoveTo,
                         onSquareTap: _onSquareTap,
+                        language: widget.settings.language,
                       ),
                     ),
                   ),
@@ -754,6 +805,12 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         ),
                         label: Text(_isSetupMode ? 'Done' : 'Setup'),
                       ),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: _openSettings,
+                        icon: const Icon(Icons.settings, size: 20),
+                        tooltip: 'Settings',
+                      ),
                     ],
                   ),
                 ),
@@ -767,6 +824,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                       lines: _analysisLines,
                       bestMove: _latestBestMove,
                       position: _enginePosition ?? _position,
+                      language: widget.settings.language,
+                      scorePerspective: widget.settings.scorePerspective,
                     ),
                   ),
                 ),
