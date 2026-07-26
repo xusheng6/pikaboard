@@ -468,12 +468,13 @@ void main() {
   });
 
   group('BoardWidget highlights', () {
-    /// Counts squares ringed in [color], the border used by the move
-    /// highlights (pieces use red/black borders).
-    int ringsOf(WidgetTester tester, Color color) {
+    /// Counts move markers drawn in [color]: a ring around an occupied square
+    /// or a dot on an empty one (pieces use red/black borders of their own).
+    int marksOf(WidgetTester tester, Color color) {
       return tester.widgetList<Container>(find.byType(Container)).where((c) {
         final d = c.decoration;
-        return d is BoxDecoration && d.border?.top.color == color;
+        if (d is! BoxDecoration) return false;
+        return d.border?.top.color == color || d.color == color;
       }).length;
     }
 
@@ -483,6 +484,7 @@ void main() {
           home: Scaffold(
             body: BoardWidget(
               position: Position.startPosition(),
+              // b0 holds a knight, c2 is empty; likewise b9 and c7.
               highlightFrom: 1,
               highlightTo: 20,
               ponderFrom: 82,
@@ -491,8 +493,36 @@ void main() {
           ),
         ),
       );
-      expect(ringsOf(tester, Colors.green.shade700), 2);
-      expect(ringsOf(tester, Colors.blue.shade700), 2);
+      expect(marksOf(tester, Colors.green.shade600), 2);
+      expect(marksOf(tester, Colors.blue.shade600), 2);
+    });
+
+    testWidgets('occupied squares get a ring, empty ones only a dot', (
+      tester,
+    ) async {
+      final start = Position.startPosition();
+
+      Future<Size> markSize(int square) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: BoardWidget(position: start, highlightFrom: square),
+            ),
+          ),
+        );
+        final mark = find.byWidgetPredicate((w) {
+          final d = w is Container ? w.decoration : null;
+          return d is BoxDecoration &&
+              (d.border?.top.color == Colors.green.shade600 ||
+                  d.color == Colors.green.shade600);
+        });
+        return tester.getSize(mark);
+      }
+
+      final onPiece = await markSize(1); // b0, a knight
+      final onEmpty = await markSize(20); // c2, empty
+      // The dot is well inside the piece; the ring hugs its edge.
+      expect(onEmpty.width, lessThan(onPiece.width / 2));
     });
 
     testWidgets('viewFromBlack rotates the drawing, not the position', (
@@ -527,8 +557,8 @@ void main() {
           home: Scaffold(body: BoardWidget(position: Position.startPosition())),
         ),
       );
-      expect(ringsOf(tester, Colors.green.shade700), 0);
-      expect(ringsOf(tester, Colors.blue.shade700), 0);
+      expect(marksOf(tester, Colors.green.shade600), 0);
+      expect(marksOf(tester, Colors.blue.shade600), 0);
     });
   });
 

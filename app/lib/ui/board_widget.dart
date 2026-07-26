@@ -97,46 +97,14 @@ class BoardWidget extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              // Last move played highlight
+              // Move indicators, weakest first so the best move wins a square
+              // shared with another marker (e.g. a recapture).
               if (isLastFrom || isLastTo)
-                Container(
-                  width: pieceSize + 2,
-                  height: pieceSize + 2,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.amber.withValues(alpha: 0.3),
-                  ),
-                ),
-              // Opponent's best reply (drawn first so the best move wins when
-              // both land on the same square, e.g. a recapture)
+                _marker(Colors.amber.shade700, pieceSize, piece != null),
               if (isPonderFrom || isPonderTo)
-                Container(
-                  width: pieceSize + 6,
-                  height: pieceSize + 6,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isPonderFrom
-                        ? Colors.blue.withValues(alpha: 0.25)
-                        : Colors.blue.withValues(alpha: 0.35),
-                    border: Border.all(color: Colors.blue.shade700, width: 2.5),
-                  ),
-                ),
-              // Best move highlight (behind piece)
+                _marker(Colors.blue.shade600, pieceSize, piece != null),
               if (isHighlightFrom || isHighlightTo)
-                Container(
-                  width: pieceSize + 6,
-                  height: pieceSize + 6,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isHighlightFrom
-                        ? Colors.green.withValues(alpha: 0.3)
-                        : Colors.green.withValues(alpha: 0.4),
-                    border: Border.all(
-                      color: Colors.green.shade700,
-                      width: 2.5,
-                    ),
-                  ),
-                ),
+                _marker(Colors.green.shade600, pieceSize, piece != null),
               // Piece
               if (piece != null)
                 _PieceWidget(
@@ -155,29 +123,30 @@ class BoardWidget extends StatelessWidget {
                     border: Border.all(color: Colors.orange.shade600, width: 3),
                   ),
                 ),
-              // Empty square markers for the move destinations
-              if (isHighlightTo && piece == null)
-                Container(
-                  width: pieceSize * 0.4,
-                  height: pieceSize * 0.4,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.green.shade600,
-                  ),
-                )
-              else if (isPonderTo && piece == null)
-                Container(
-                  width: pieceSize * 0.4,
-                  height: pieceSize * 0.4,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.blue.shade600,
-                  ),
-                ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  /// A move marker in [color]: a slim ring hugging the piece when the square is
+  /// occupied, otherwise just the small centre dot.
+  static Widget _marker(Color color, double pieceSize, bool occupied) {
+    if (occupied) {
+      return Container(
+        width: pieceSize + 4,
+        height: pieceSize + 4,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: color, width: 2),
+        ),
+      );
+    }
+    return Container(
+      width: pieceSize * 0.34,
+      height: pieceSize * 0.34,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
     );
   }
 }
