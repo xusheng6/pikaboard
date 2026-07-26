@@ -1441,6 +1441,12 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         onSelect: _goToNode,
                         onDelete: _deleteNode,
                         onPromote: _promoteNode,
+                        showPreview: settings.previewOnMoveTree,
+                        viewFromBlack: _viewFromBlack,
+                        scoreLabelFor: (node) {
+                          final sample = _evalByFen[node.position.toFen()];
+                          return sample == null ? null : scoreLabel(sample.cp);
+                        },
                       ),
                     ),
                   if (_game.root.children.isNotEmpty) const Divider(height: 1),
@@ -1483,6 +1489,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                                   bestMoveStale: !_engineMatchesBoard,
                                   language: settings.language,
                                   scorePerspective: settings.scorePerspective,
+                                  showPreview: settings.previewOnEngineLine,
+                                  viewFromBlack: _viewFromBlack,
                                 ),
                                 NotesPanel(
                                   node: _current,
@@ -1512,6 +1520,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                                   analysisTotal: _batchTotal,
                                   showPreview: settings.previewOnChart,
                                   language: settings.language,
+                                  viewFromBlack: _viewFromBlack,
                                 ),
                               ],
                             ),

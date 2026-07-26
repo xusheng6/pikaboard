@@ -1204,6 +1204,52 @@ void main() {
   });
 
   group('MoveTree', () {
+    testWidgets('previews follow the board orientation and can be turned off', (
+      tester,
+    ) async {
+      final game = Game.fromMoves(Position.startPosition(), ['h2e2']);
+
+      Future<void> pump({
+        required bool flipped,
+        required bool showPreview,
+      }) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: MoveTree(
+                game: game,
+                current: game.root,
+                onSelect: (_) {},
+                showPreview: showPreview,
+                viewFromBlack: flipped,
+              ),
+            ),
+          ),
+        );
+      }
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+
+      await pump(flipped: true, showPreview: true);
+      await mouse.moveTo(tester.getCenter(find.textContaining('1.')));
+      await tester.pump();
+      expect(find.byType(MovePreviewCard), findsOneWidget);
+      expect(
+        tester.widget<BoardWidget>(find.byType(BoardWidget)).viewFromBlack,
+        isTrue,
+      );
+
+      // Turning the preview off leaves the move alone.
+      await mouse.moveTo(Offset.zero);
+      await tester.pump();
+      await pump(flipped: true, showPreview: false);
+      await mouse.moveTo(tester.getCenter(find.textContaining('1.')));
+      await tester.pump();
+      expect(find.byType(MovePreviewCard), findsNothing);
+    });
+
     testWidgets('renders numbered moves and selects on tap', (tester) async {
       final game = Game.fromMoves(Position.startPosition(), ['b0c2', 'b9c7']);
       GameNode? selected;
