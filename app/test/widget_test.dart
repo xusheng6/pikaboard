@@ -53,6 +53,37 @@ void main() {
     });
   });
 
+  group('Score display', () {
+    test('red perspective flips sign for black to move', () {
+      final info = _line(10, scoreCp: 30, pv: 'h2e2');
+      final red = formatScore(
+        info,
+        sideToMoveIsRed: true,
+        redPerspective: true,
+      );
+      expect(red.text, '+30');
+      expect(red.positive, isTrue);
+
+      final black = formatScore(
+        info,
+        sideToMoveIsRed: false,
+        redPerspective: true,
+      );
+      expect(black.text, '-30');
+      expect(black.positive, isFalse);
+    });
+
+    test('side-to-move mode leaves the sign unchanged', () {
+      final info = _line(10, scoreCp: 30, pv: 'h2e2');
+      final black = formatScore(
+        info,
+        sideToMoveIsRed: false,
+        redPerspective: false,
+      );
+      expect(black.text, '+30');
+    });
+  });
+
   group('AnalysisPanel table', () {
     testWidgets('renders header and one row per line', (tester) async {
       final start = Position.startPosition();

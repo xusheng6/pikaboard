@@ -1,7 +1,29 @@
 import 'package:flutter/material.dart';
 import '../engine/search_info.dart';
 import '../models/move_notation.dart';
+import '../models/piece.dart';
 import '../models/position.dart';
+
+/// Formats [info]'s score for display.
+///
+/// The engine reports scores from the side-to-move's perspective. When
+/// [redPerspective] is true the value is flipped for black-to-move positions
+/// so that positive always means red is better; otherwise it is shown as-is
+/// from the side to move. Returns the text and whether it is non-negative
+/// (used to pick the color).
+({String text, bool positive}) formatScore(
+  SearchInfo info, {
+  required bool sideToMoveIsRed,
+  required bool redPerspective,
+}) {
+  final flip = redPerspective && !sideToMoveIsRed;
+  if (info.scoreMate != null) {
+    final m = flip ? -info.scoreMate! : info.scoreMate!;
+    return (text: 'M${m > 0 ? '+' : ''}$m', positive: m > 0);
+  }
+  final cp = flip ? -(info.scoreCp ?? 0) : (info.scoreCp ?? 0);
+  return (text: '${cp >= 0 ? '+' : ''}$cp', positive: cp >= 0);
+}
 
 // Shared column widths so the header and every row line up.
 const double _kDepthWidth = 34;
@@ -122,7 +144,12 @@ class _LineRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final info = line.info;
-    final scoreColor = _isAdvantage(info)
+    final score = formatScore(
+      info,
+      sideToMoveIsRed: line.position.sideToMove == PieceColor.red,
+      redPerspective: true,
+    );
+    final scoreColor = score.positive
         ? Colors.green.shade800
         : Colors.red.shade800;
     final bound = info.isLowerbound
@@ -148,7 +175,7 @@ class _LineRow extends StatelessWidget {
           SizedBox(
             width: _kScoreWidth,
             child: Text(
-              '$bound${info.scoreText}',
+              '$bound${score.text}',
               style: TextStyle(
                 fontSize: 13,
                 fontFamily: 'monospace',
@@ -180,11 +207,5 @@ class _LineRow extends StatelessWidget {
 
     // Grey out lines that belong to a previous board position.
     return line.stale ? Opacity(opacity: 0.4, child: row) : row;
-  }
-
-  /// True when the score favors the side to move (green), else red.
-  static bool _isAdvantage(SearchInfo info) {
-    if (info.scoreMate != null) return info.scoreMate! > 0;
-    return (info.scoreCp ?? 0) >= 0;
   }
 }
