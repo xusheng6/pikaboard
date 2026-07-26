@@ -13,6 +13,7 @@ import 'analysis_panel.dart';
 import 'candidate_moves.dart';
 import 'engine_output.dart';
 import 'move_list.dart';
+import 'score_chart.dart';
 import 'settings_page.dart';
 
 class PikaboardApp extends StatefulWidget {
@@ -130,6 +131,16 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   // ones until the next hard reset.
   List<AnalysisLine> _staleLines = [];
 
+  // Evaluations collected while analysing, keyed by FEN so they survive moving
+  // back and forth through the game. Feeds the score chart.
+  final Map<String, ScoreSample> _evalByFen = {};
+
+  /// Score of every position in the game so far, in play order; null where a
+  /// position has not been analysed.
+  List<int?> get _scoreByPly => [
+    for (final position in _history) _evalByFen[position.toFen()]?.cp,
+  ];
+
   /// Rows for the analysis table: current-position lines (deepest on top)
   /// first, then any stale previous-position lines.
   List<AnalysisLine> get _analysisLines {
@@ -149,6 +160,23 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
               ),
             );
     return [...cur, ..._staleLines];
+  }
+
+  /// Remember [info]'s score for the position being searched, keeping the
+  /// deepest result per position so the chart settles rather than flickers.
+  void _recordEval(SearchInfo info) {
+    final searched = _enginePosition;
+    if (searched == null) return;
+    final cp = redCentipawns(
+      info,
+      sideToMoveIsRed: searched.sideToMove == PieceColor.red,
+    );
+    if (cp == null) return;
+    final fen = searched.toFen();
+    final previous = _evalByFen[fen];
+    if (previous == null || info.depth >= previous.depth) {
+      _evalByFen[fen] = ScoreSample(cp: cp, depth: info.depth);
+    }
   }
 
   /// Send [pos] to the engine and start an infinite search, demoting the
@@ -266,6 +294,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
             _bestUci = info.pv.first;
             _ponderUci = info.pv.length > 1 ? info.pv[1] : null;
           }
+          _recordEval(info);
         });
       });
       _bestMoveSub = _engine.bestMove.listen((bm) {
@@ -649,6 +678,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _latestBestMove = null;
       _curByDepth.clear();
       _staleLines = [];
+      // A different game means a different graph.
+      _evalByFen.clear();
       _enginePosition = null;
       _bestUci = null;
       _ponderUci = null;
@@ -667,6 +698,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _latestBestMove = null;
       _curByDepth.clear();
       _staleLines = [];
+      // A different game means a different graph.
+      _evalByFen.clear();
       _enginePosition = null;
       _bestUci = null;
       _ponderUci = null;
@@ -687,6 +720,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         _latestBestMove = null;
         _curByDepth.clear();
         _staleLines = [];
+        // A different game means a different graph.
+        _evalByFen.clear();
         _enginePosition = null;
         _bestUci = null;
         _ponderUci = null;
@@ -714,6 +749,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _latestBestMove = null;
       _curByDepth.clear();
       _staleLines = [];
+      // A different game means a different graph.
+      _evalByFen.clear();
       _enginePosition = null;
       _lastMoveFrom = null;
       _lastMoveTo = null;
@@ -1015,7 +1052,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                 // Engine analysis and cloud candidates in separate tabs
                 Expanded(
                   child: DefaultTabController(
-                    length: 3,
+                    length: 4,
                     child: Column(
                       children: [
                         const TabBar(
@@ -1023,6 +1060,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                             Tab(text: 'Engine'),
                             Tab(text: 'Cloud'),
                             Tab(text: 'Raw'),
+                            Tab(text: 'Score'),
                           ],
                         ),
                         Expanded(
@@ -1057,6 +1095,11 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                                 ),
                               ),
                               EngineOutputView(log: _engineLog),
+                              ScoreChart(
+                                centipawns: _scoreByPly,
+                                currentPly: _historyIndex,
+                                onSelect: _goToIndex,
+                              ),
                             ],
                           ),
                         ),

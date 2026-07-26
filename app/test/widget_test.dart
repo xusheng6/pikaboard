@@ -12,6 +12,7 @@ import 'package:app/models/move_rules.dart';
 import 'package:app/ui/board_widget.dart';
 import 'package:app/ui/engine_output.dart';
 import 'package:app/ui/move_list.dart';
+import 'package:app/ui/score_chart.dart';
 
 SearchInfo _line(int depth, {int scoreCp = 0, required String pv}) {
   return SearchInfo(
@@ -591,6 +592,88 @@ void main() {
       );
       expect(marksOf(tester, Colors.amber.shade700), 0);
       expect(arrowLayers(tester), 0);
+    });
+  });
+
+  group('Score chart', () {
+    test('scores are charted from Red\'s point of view', () {
+      final info = _line(12, scoreCp: 40, pv: 'b0c2');
+      expect(redCentipawns(info, sideToMoveIsRed: true), 40);
+      // The engine scores from the side to move, so black-to-move flips.
+      expect(redCentipawns(info, sideToMoveIsRed: false), -40);
+
+      final mate = SearchInfo(
+        depth: 20,
+        selDepth: 24,
+        multiPV: 1,
+        scoreMate: 3,
+        nodes: 1,
+        nps: 1,
+        timeMs: 1,
+        hashfull: 0,
+        pv: const ['b0c2'],
+      );
+      expect(redCentipawns(mate, sideToMoveIsRed: true), kMateCentipawns);
+      expect(redCentipawns(mate, sideToMoveIsRed: false), -kMateCentipawns);
+
+      final noScore = SearchInfo(
+        depth: 1,
+        selDepth: 1,
+        multiPV: 1,
+        nodes: 1,
+        nps: 1,
+        timeMs: 1,
+        hashfull: 0,
+        pv: const ['b0c2'],
+      );
+      expect(redCentipawns(noScore, sideToMoveIsRed: true), isNull);
+    });
+
+    testWidgets('prompts when nothing has been analysed', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: ScoreChart(centipawns: [null, null], currentPly: 0),
+          ),
+        ),
+      );
+      expect(find.textContaining('No evaluations yet'), findsOneWidget);
+    });
+
+    testWidgets('plots what is known and reports the coverage', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: ScoreChart(centipawns: [20, null, -140, 65], currentPly: 2),
+          ),
+        ),
+      );
+      expect(find.text('3 of 4 positions'), findsOneWidget);
+      // The score at the current ply is called out.
+      expect(find.text('-140'), findsOneWidget);
+    });
+
+    testWidgets('tapping the chart jumps to that ply', (tester) async {
+      var selected = -1;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ScoreChart(
+              centipawns: const [0, 50, 100, 150, 200],
+              currentPly: 0,
+              onSelect: (ply) => selected = ply,
+            ),
+          ),
+        ),
+      );
+
+      final chart = find.byType(CustomPaint).last;
+      final rect = tester.getRect(chart);
+      await tester.tapAt(Offset(rect.right - 14, rect.center.dy));
+      expect(selected, 4, reason: 'a tap at the right edge is the last ply');
+
+      await tester.tapAt(Offset(rect.left + 14, rect.center.dy));
+      expect(selected, 0);
     });
   });
 
