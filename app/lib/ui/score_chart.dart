@@ -100,6 +100,9 @@ class ScoreChart extends StatefulWidget {
   final bool showPreview;
   final DisplayLanguage language;
 
+  /// Draw previews rotated, matching a board viewed from Black's side.
+  final bool viewFromBlack;
+
   const ScoreChart({
     super.key,
     required this.points,
@@ -111,6 +114,7 @@ class ScoreChart extends StatefulWidget {
     this.analysisTotal,
     this.showPreview = true,
     this.language = DisplayLanguage.simplified,
+    this.viewFromBlack = false,
   });
 
   bool get isAnalysing => analysedCount != null && analysisTotal != null;
@@ -394,6 +398,7 @@ class _ScoreChartState extends State<ScoreChart> {
           '${depth == null ? '' : '   depth $depth'}',
       position: point.position,
       language: widget.language,
+      viewFromBlack: widget.viewFromBlack,
       arrows: [
         if (point.bestMoveUci != null && point.bestMoveUci!.length >= 4)
           BoardArrow(

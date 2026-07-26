@@ -32,6 +32,9 @@ class MoveTree extends StatelessWidget {
   /// Score for a position, shown in the preview when one is known.
   final String? Function(GameNode node)? scoreLabelFor;
 
+  /// Draw previews rotated, matching a board viewed from Black's side.
+  final bool viewFromBlack;
+
   const MoveTree({
     super.key,
     required this.game,
@@ -41,6 +44,7 @@ class MoveTree extends StatelessWidget {
     this.onPromote,
     this.showPreview = true,
     this.scoreLabelFor,
+    this.viewFromBlack = false,
     this.language = DisplayLanguage.simplified,
   });
 
@@ -200,6 +204,7 @@ class MoveTree extends StatelessWidget {
             : (node.comment.isEmpty ? null : node.comment),
         position: node.position,
         language: language,
+        viewFromBlack: viewFromBlack,
         arrows: [
           if (node.move != null && node.parent != null)
             BoardArrow(

@@ -135,8 +135,11 @@ class MovePreviewCard extends StatelessWidget {
   final List<PreviewRow> rows;
   final DisplayLanguage language;
 
+  /// Draw the preview rotated, matching a board being viewed from Black's side.
+  final bool viewFromBlack;
+
   /// Board width inside the card. Big enough to read the pieces at a glance.
-  static const double boardWidth = 236;
+  static const double boardWidth = 300;
 
   const MovePreviewCard({
     super.key,
@@ -146,6 +149,7 @@ class MovePreviewCard extends StatelessWidget {
     this.arrows = const [],
     this.rows = const [],
     this.language = DisplayLanguage.simplified,
+    this.viewFromBlack = false,
   });
 
   /// Room the card needs, so [HoverPreview] can place it before building it.
@@ -201,6 +205,7 @@ class MovePreviewCard extends StatelessWidget {
                 position: position,
                 arrows: arrows,
                 language: language,
+                viewFromBlack: viewFromBlack,
               ),
             ),
             for (final row in rows) ...[

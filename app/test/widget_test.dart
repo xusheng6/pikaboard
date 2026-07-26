@@ -906,6 +906,39 @@ void main() {
       expect(find.byType(BoardWidget), findsOneWidget);
     });
 
+    testWidgets('previews follow the board when it is viewed from Black', (
+      tester,
+    ) async {
+      // One pointer for both passes: adding a second while the first is still
+      // registered upsets the mouse tracker.
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+
+      Future<BoardWidget> hoverPreviewBoard({required bool flipped}) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: ScoreChart(
+                points: points([40, -60], best: ['h2e2', null]),
+                currentPly: 0,
+                viewFromBlack: flipped,
+              ),
+            ),
+          ),
+        );
+        final rect = tester.getRect(find.byType(CustomPaint).last);
+        await mouse.moveTo(Offset.zero);
+        await tester.pump();
+        await mouse.moveTo(Offset(rect.left + 10, rect.center.dy));
+        await tester.pump();
+        return tester.widget<BoardWidget>(find.byType(BoardWidget));
+      }
+
+      expect((await hoverPreviewBoard(flipped: false)).viewFromBlack, isFalse);
+      expect((await hoverPreviewBoard(flipped: true)).viewFromBlack, isTrue);
+    });
+
     testWidgets('offers whole-game analysis and reports its progress', (
       tester,
     ) async {

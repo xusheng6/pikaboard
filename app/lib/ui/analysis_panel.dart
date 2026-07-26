@@ -59,6 +59,9 @@ class AnalysisPanel extends StatelessWidget {
   /// Preview the position a move in a line leads to while it is hovered.
   final bool showPreview;
 
+  /// Draw previews rotated, matching a board viewed from Black's side.
+  final bool viewFromBlack;
+
   /// Rows to show, current-position lines first (deepest on top) followed by
   /// any stale previous-position lines.
   final List<AnalysisLine> lines;
@@ -82,6 +85,7 @@ class AnalysisPanel extends StatelessWidget {
     this.language = DisplayLanguage.simplified,
     this.scorePerspective = ScorePerspective.red,
     this.showPreview = true,
+    this.viewFromBlack = false,
   });
 
   @override
@@ -117,6 +121,7 @@ class AnalysisPanel extends StatelessWidget {
                       language: language,
                       scorePerspective: scorePerspective,
                       showPreview: showPreview,
+                      viewFromBlack: viewFromBlack,
                     ),
                 ],
               ],
@@ -250,12 +255,14 @@ class _LineRow extends StatelessWidget {
   final DisplayLanguage language;
   final ScorePerspective scorePerspective;
   final bool showPreview;
+  final bool viewFromBlack;
 
   const _LineRow({
     required this.line,
     required this.language,
     required this.scorePerspective,
     this.showPreview = true,
+    this.viewFromBlack = false,
   });
 
   @override
@@ -316,6 +323,7 @@ class _LineRow extends StatelessWidget {
                     pvText: info.pvText,
                     position: line.position,
                     language: language,
+                    viewFromBlack: viewFromBlack,
                   )
                 : Text(
                     MoveNotation.pvToNotation(
@@ -342,11 +350,13 @@ class _PvMoves extends StatelessWidget {
   final String pvText;
   final Position position;
   final DisplayLanguage language;
+  final bool viewFromBlack;
 
   const _PvMoves({
     required this.pvText,
     required this.position,
     required this.language,
+    this.viewFromBlack = false,
   });
 
   @override
@@ -374,6 +384,7 @@ class _PvMoves extends StatelessWidget {
                   subtitle: 'after ${i + 1} of ${steps.length} in this line',
                   position: steps[i].after,
                   language: language,
+                  viewFromBlack: viewFromBlack,
                   arrows: [
                     BoardArrow(
                       from: Position.uciToSquare(steps[i].uci.substring(0, 2))!,
