@@ -102,9 +102,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       setState(() => _engineReady = true);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Engine init failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Engine init failed: $e')));
       }
     }
   }
@@ -326,8 +326,10 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Place piece at ${Position.squareToUci(square)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(
+                'Place piece at ${Position.squareToUci(square)}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -339,8 +341,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                     ],
                     onPressed: (i) {
                       setState(() {
-                        _setupColor =
-                            i == 0 ? PieceColor.red : PieceColor.black;
+                        _setupColor = i == 0
+                            ? PieceColor.red
+                            : PieceColor.black;
                       });
                       Navigator.pop(context);
                       _showPiecePicker(square);
@@ -348,8 +351,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                     children: const [
                       Padding(
                         padding: EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('Red',
-                            style: TextStyle(color: Colors.red)),
+                        child: Text('Red', style: TextStyle(color: Colors.red)),
                       ),
                       Padding(
                         padding: EdgeInsets.symmetric(horizontal: 12),
@@ -377,7 +379,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                     onPressed: () {
                       setState(() {
                         _replaceCurrentPosition(
-                            _position.withPiece(square, piece));
+                          _position.withPiece(square, piece),
+                        );
                         _fenController.text = _position.toFen();
                       });
                       Navigator.pop(context);
@@ -463,220 +466,261 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         _lastMoveTo = null;
       });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Invalid FEN: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Invalid FEN: $e')));
     }
   }
 
   void _toggleSideToMove() {
     setState(() {
-      _replaceCurrentPosition(_position.withSideToMove(
-        _position.sideToMove == PieceColor.red
-            ? PieceColor.black
-            : PieceColor.red,
-      ));
+      _replaceCurrentPosition(
+        _position.withSideToMove(
+          _position.sideToMove == PieceColor.red
+              ? PieceColor.black
+              : PieceColor.red,
+        ),
+      );
       _fenController.text = _position.toFen();
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    // Cap board width to 430px so it doesn't fill the entire iPad screen
+    const double maxBoardWidth = 430;
+
     return Scaffold(
       body: SafeArea(
-        child: Column(
-          children: [
-            // FEN input
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _fenController,
-                      style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-                      decoration: const InputDecoration(
-                        isDense: true,
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                        border: OutlineInputBorder(),
-                        hintText: 'FEN',
-                      ),
-                      onSubmitted: (_) => _applyFen(),
-                    ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Cap the board's height so it shrinks to fit short windows
+            // instead of overflowing; leave room for the control rows and a
+            // usable analysis panel below.
+            final double boardMaxHeight = (constraints.maxHeight - 340).clamp(
+              160.0,
+              620.0,
+            );
+            return Column(
+              children: [
+                // FEN input
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.check, size: 20),
-                    onPressed: _applyFen,
-                    tooltip: 'Apply FEN',
-                  ),
-                ],
-              ),
-            ),
-
-            // Board
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: BoardWidget(
-                position: _position,
-                selectedSquare: _selectedSquare,
-                highlightFrom: _bestMoveFrom,
-                highlightTo: _bestMoveTo,
-                lastMoveFrom: _lastMoveFrom,
-                lastMoveTo: _lastMoveTo,
-                onSquareTap: _onSquareTap,
-              ),
-            ),
-
-            // Move navigation
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    onPressed: _canGoBack ? _goToStart : null,
-                    icon: const Icon(Icons.skip_previous, size: 22),
-                    tooltip: 'Go to start',
-                  ),
-                  IconButton(
-                    onPressed: _canGoBack ? _goBack : null,
-                    icon: const Icon(Icons.chevron_left, size: 28),
-                    tooltip: 'Previous move',
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Text(
-                      '${_historyIndex}/${_history.length - 1}',
-                      style: const TextStyle(fontSize: 13, color: Colors.grey),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: _canGoForward ? _goForward : null,
-                    icon: const Icon(Icons.chevron_right, size: 28),
-                    tooltip: 'Next move',
-                  ),
-                  IconButton(
-                    onPressed: _canGoForward ? _goToEnd : null,
-                    icon: const Icon(Icons.skip_next, size: 22),
-                    tooltip: 'Go to end',
-                  ),
-                ],
-              ),
-            ),
-
-            // Controls
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: _engineReady && !_isAnalyzing
-                          ? _startAnalysis
-                          : null,
-                      icon: const Icon(Icons.play_arrow, size: 18),
-                      label: const Text('Analyze'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _isAnalyzing ? _stopAnalysis : null,
-                      icon: const Icon(Icons.stop, size: 18),
-                      label: const Text('Stop'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Side to move indicator / toggle
-                  GestureDetector(
-                    onTap: _isAnalyzing ? null : _toggleSideToMove,
-                    child: Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _position.sideToMove == PieceColor.red
-                            ? Colors.red
-                            : Colors.black87,
-                        border: Border.all(color: Colors.grey.shade400),
-                      ),
-                      child: Center(
-                        child: Text(
-                          _position.sideToMove == PieceColor.red ? 'R' : 'B',
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _fenController,
                           style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                          ),
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 8,
+                            ),
+                            border: OutlineInputBorder(),
+                            hintText: 'FEN',
+                          ),
+                          onSubmitted: (_) => _applyFen(),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.check, size: 20),
+                        onPressed: _applyFen,
+                        tooltip: 'Apply FEN',
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Board — constrained to maxBoardWidth
+                Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: maxBoardWidth,
+                      maxHeight: boardMaxHeight,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: BoardWidget(
+                        position: _position,
+                        selectedSquare: _selectedSquare,
+                        highlightFrom: _bestMoveFrom,
+                        highlightTo: _bestMoveTo,
+                        lastMoveFrom: _lastMoveFrom,
+                        lastMoveTo: _lastMoveTo,
+                        onSquareTap: _onSquareTap,
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Move navigation
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        onPressed: _canGoBack ? _goToStart : null,
+                        icon: const Icon(Icons.skip_previous, size: 22),
+                        tooltip: 'Go to start',
+                      ),
+                      IconButton(
+                        onPressed: _canGoBack ? _goBack : null,
+                        icon: const Icon(Icons.chevron_left, size: 28),
+                        tooltip: 'Previous move',
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(
+                          '${_historyIndex}/${_history.length - 1}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey,
                           ),
                         ),
                       ),
-                    ),
+                      IconButton(
+                        onPressed: _canGoForward ? _goForward : null,
+                        icon: const Icon(Icons.chevron_right, size: 28),
+                        tooltip: 'Next move',
+                      ),
+                      IconButton(
+                        onPressed: _canGoForward ? _goToEnd : null,
+                        icon: const Icon(Icons.skip_next, size: 22),
+                        tooltip: 'Go to end',
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-
-            // Secondary controls
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: _isAnalyzing ? null : _resetPosition,
-                    icon: const Icon(Icons.restart_alt, size: 18),
-                    label: const Text('New'),
-                  ),
-                  TextButton.icon(
-                    onPressed: _isAnalyzing ? null : _clearBoard,
-                    icon: const Icon(Icons.clear_all, size: 18),
-                    label: const Text('Clear'),
-                  ),
-                  TextButton.icon(
-                    onPressed: _isAnalyzing
-                        ? null
-                        : () => setState(() => _isSetupMode = !_isSetupMode),
-                    icon: Icon(
-                      _isSetupMode ? Icons.check : Icons.edit,
-                      size: 18,
-                    ),
-                    label: Text(_isSetupMode ? 'Done' : 'Setup'),
-                  ),
-                ],
-              ),
-            ),
-
-            const Divider(height: 1),
-
-            // Analysis output
-            Expanded(
-              child: SingleChildScrollView(
-                child: AnalysisPanel(
-                  info: _latestInfo,
-                  bestMove: _latestBestMove,
-                  position: _analysisPosition ?? _position,
                 ),
-              ),
-            ),
 
-            // Engine status
-            if (!_engineReady)
-              const Padding(
-                padding: EdgeInsets.all(8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    SizedBox(width: 8),
-                    Text('Loading engine...'),
-                  ],
+                // Controls
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _engineReady && !_isAnalyzing
+                              ? _startAnalysis
+                              : null,
+                          icon: const Icon(Icons.play_arrow, size: 18),
+                          label: const Text('Analyze'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _isAnalyzing ? _stopAnalysis : null,
+                          icon: const Icon(Icons.stop, size: 18),
+                          label: const Text('Stop'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Side to move indicator / toggle
+                      GestureDetector(
+                        onTap: _isAnalyzing ? null : _toggleSideToMove,
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _position.sideToMove == PieceColor.red
+                                ? Colors.red
+                                : Colors.black87,
+                            border: Border.all(color: Colors.grey.shade400),
+                          ),
+                          child: Center(
+                            child: Text(
+                              _position.sideToMove == PieceColor.red
+                                  ? 'R'
+                                  : 'B',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-          ],
+
+                // Secondary controls
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      TextButton.icon(
+                        onPressed: _isAnalyzing ? null : _resetPosition,
+                        icon: const Icon(Icons.restart_alt, size: 18),
+                        label: const Text('New'),
+                      ),
+                      TextButton.icon(
+                        onPressed: _isAnalyzing ? null : _clearBoard,
+                        icon: const Icon(Icons.clear_all, size: 18),
+                        label: const Text('Clear'),
+                      ),
+                      TextButton.icon(
+                        onPressed: _isAnalyzing
+                            ? null
+                            : () =>
+                                  setState(() => _isSetupMode = !_isSetupMode),
+                        icon: Icon(
+                          _isSetupMode ? Icons.check : Icons.edit,
+                          size: 18,
+                        ),
+                        label: Text(_isSetupMode ? 'Done' : 'Setup'),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const Divider(height: 1),
+
+                // Analysis output
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: AnalysisPanel(
+                      info: _latestInfo,
+                      bestMove: _latestBestMove,
+                      position: _analysisPosition ?? _position,
+                    ),
+                  ),
+                ),
+
+                // Engine status
+                if (!_engineReady)
+                  const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 8),
+                        Text('Loading engine...'),
+                      ],
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );

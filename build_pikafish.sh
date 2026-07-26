@@ -5,8 +5,24 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PIKAFISH_SRC="$SCRIPT_DIR/Pikafish/src"
 BRIDGE_SRC="$SCRIPT_DIR/pikafish_bridge"
 
-# Target: macos (for testing) or ios
+# Target: macos (static lib, for testing), ios, ios-simulator, or
+# macos-exe (standalone Pikafish CLI binary bundled into the macOS desktop app).
 TARGET="${1:-macos}"
+
+# The desktop app talks to Pikafish as a subprocess over UCI, so it needs the
+# real executable rather than a static library. Build it via Pikafish's own
+# Makefile and drop it where the Xcode "Bundle Pikafish Engine" phase expects it.
+if [ "$TARGET" = "macos-exe" ]; then
+    echo "=== Building Pikafish CLI executable (apple-silicon) ==="
+    make -C "$PIKAFISH_SRC" -j build ARCH=apple-silicon COMP=clang
+    DEST="$SCRIPT_DIR/app/macos/engine"
+    mkdir -p "$DEST"
+    cp -f "$PIKAFISH_SRC/pikafish" "$DEST/pikafish"
+    chmod +x "$DEST/pikafish"
+    echo "=== Done: $DEST/pikafish ==="
+    ls -lh "$DEST/pikafish"
+    exit 0
+fi
 
 if [ "$TARGET" = "ios" ]; then
     BUILD_DIR="$SCRIPT_DIR/build/ios-arm64"
