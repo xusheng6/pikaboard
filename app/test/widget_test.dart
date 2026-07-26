@@ -7,6 +7,7 @@ import 'package:app/models/piece.dart';
 import 'package:app/models/position.dart';
 import 'package:app/models/settings.dart';
 import 'package:app/ui/analysis_panel.dart';
+import 'package:app/ui/move_list.dart';
 
 SearchInfo _line(int depth, {int scoreCp = 0, required String pv}) {
   return SearchInfo(
@@ -209,6 +210,52 @@ void main() {
         ),
       );
       expect(find.textContaining('Press Analyze'), findsOneWidget);
+    });
+  });
+
+  group('MoveList', () {
+    testWidgets('renders numbered moves and navigates on tap', (tester) async {
+      final p0 = Position.startPosition();
+      final p1 = MoveNotation.applyUciMove(p0, 'b0c2');
+      final p2 = MoveNotation.applyUciMove(p1, 'b9c7');
+      int? selected;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MoveList(
+              history: [p0, p1, p2],
+              currentIndex: 2,
+              language: DisplayLanguage.simplified,
+              onSelect: (i) => selected = i,
+            ),
+          ),
+        ),
+      );
+
+      // First move is numbered "1." and reconstructed as a knight move.
+      final firstMove = find.textContaining('1.');
+      expect(firstMove, findsOneWidget);
+      expect(tester.widget<Text>(firstMove).data, contains('马'));
+
+      // Tapping the first ply navigates to history index 1.
+      await tester.tap(firstMove);
+      expect(selected, 1);
+    });
+
+    testWidgets('shows placeholder with no moves', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MoveList(
+              history: [Position.startPosition()],
+              currentIndex: 0,
+              onSelect: (_) {},
+            ),
+          ),
+        ),
+      );
+      expect(find.textContaining('No moves'), findsOneWidget);
     });
   });
 }

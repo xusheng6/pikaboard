@@ -9,6 +9,7 @@ import '../models/settings.dart';
 import '../models/settings_store.dart';
 import 'board_widget.dart';
 import 'analysis_panel.dart';
+import 'move_list.dart';
 import 'settings_page.dart';
 
 class PikaboardApp extends StatefulWidget {
@@ -343,6 +344,18 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     if (_historyIndex == _history.length - 1) return;
     setState(() {
       _historyIndex = _history.length - 1;
+      _fenController.text = _position.toFen();
+      _selectedSquare = null;
+      _updateLastMoveHighlight();
+      _restartAnalysisIfNeeded();
+    });
+  }
+
+  /// Jump to a specific position in the move history.
+  void _goToIndex(int index) {
+    if (index < 0 || index >= _history.length || index == _historyIndex) return;
+    setState(() {
+      _historyIndex = index;
       _fenController.text = _position.toFen();
       _selectedSquare = null;
       _updateLastMoveHighlight();
@@ -816,6 +829,19 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                 ),
 
                 const Divider(height: 1),
+
+                // Move list (only once moves have been played)
+                if (_history.length > 1)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 64),
+                    child: MoveList(
+                      history: _history,
+                      currentIndex: _historyIndex,
+                      language: widget.settings.language,
+                      onSelect: _goToIndex,
+                    ),
+                  ),
+                if (_history.length > 1) const Divider(height: 1),
 
                 // Analysis output
                 Expanded(
