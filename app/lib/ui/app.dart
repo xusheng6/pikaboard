@@ -171,21 +171,40 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   // back and forth through the game. Feeds the score chart.
   final Map<String, ScoreSample> _evalByFen = {};
 
-  /// Score of every position in the game so far, in play order; null where a
-  /// position has not been analysed.
-  List<int?> get _scoreByPly => [
-    for (final node in _line) _evalByFen[node.position.toFen()]?.cp,
-  ];
-
-  /// Name for each ply, e.g. "3. 炮二平五" — used by the chart's hover readout.
-  List<String> get _plyLabels => [
-    for (final node in _line)
-      if (node.move == null || node.parent == null)
-        'Start'
-      else
-        '${node.moveNumber}${node.isRedMove ? '.' : '...'} '
-            '${MoveNotation.toNotation(node.move!, node.parent!.position, widget.settings.language)}',
-  ];
+  /// What the score chart plots: every position on the line, its score, and
+  /// what the engine wanted there against what was actually played.
+  List<ScorePoint> get _scorePoints {
+    final line = _line;
+    final language = widget.settings.language;
+    return [
+      for (var i = 0; i < line.length; i++)
+        () {
+          final node = line[i];
+          final sample = _evalByFen[node.position.toFen()];
+          final next = i + 1 < line.length ? line[i + 1] : null;
+          final best = sample?.bestMove;
+          return ScorePoint(
+            label: node.parent == null || node.move == null
+                ? 'Start'
+                : '${node.moveNumber}${node.isRedMove ? '.' : '...'} '
+                      '${MoveNotation.toNotation(node.move!, node.parent!.position, language)}',
+            position: node.position,
+            cp: sample?.cp,
+            depth: sample?.depth,
+            bestMoveUci: best,
+            bestMoveText: best == null
+                ? null
+                : MoveNotation.toNotation(best, node.position, language),
+            playedMoveText: next?.move == null
+                ? null
+                : MoveNotation.toNotation(next!.move!, node.position, language),
+            playedCp: next == null
+                ? null
+                : _evalByFen[next.position.toFen()]?.cp,
+          );
+        }(),
+    ];
+  }
 
   /// Rows for the analysis table: current-position lines (deepest on top)
   /// first, then any stale previous-position lines.
@@ -221,7 +240,11 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     final fen = searched.toFen();
     final previous = _evalByFen[fen];
     if (previous == null || info.depth >= previous.depth) {
-      _evalByFen[fen] = ScoreSample(cp: cp, depth: info.depth);
+      _evalByFen[fen] = ScoreSample(
+        cp: cp,
+        depth: info.depth,
+        bestMove: info.pv.isEmpty ? previous?.bestMove : info.pv.first,
+      );
     }
   }
 
@@ -1478,8 +1501,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                                 ),
                                 EngineOutputView(log: _engineLog),
                                 ScoreChart(
-                                  centipawns: _scoreByPly,
-                                  plyLabels: _plyLabels,
+                                  points: _scorePoints,
                                   currentPly: _current.ply,
                                   onSelect: _goToPly,
                                   onAnalyseGame: _engineReady

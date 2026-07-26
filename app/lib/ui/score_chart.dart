@@ -1,14 +1,55 @@
 import 'package:flutter/material.dart';
 
 import '../engine/search_info.dart';
+import '../models/position.dart';
+import 'board_widget.dart';
 
 /// A stored evaluation for one position: [cp] is centipawns from Red's point
-/// of view, [depth] the search that produced it so deeper results can win.
+/// of view, [depth] the search that produced it so deeper results can win, and
+/// [bestMove] the move the engine wanted, in UCI.
 class ScoreSample {
   final int cp;
   final int depth;
+  final String? bestMove;
 
-  const ScoreSample({required this.cp, required this.depth});
+  const ScoreSample({required this.cp, required this.depth, this.bestMove});
+}
+
+/// One plotted position: its score, and what the hover readout needs to
+/// explain it.
+class ScorePoint {
+  /// How the move that reached this position reads, e.g. "3. 炮二平五".
+  final String label;
+
+  /// The position itself, drawn as a preview on hover.
+  final Position position;
+
+  /// Score from Red's point of view, null when the position is unanalysed.
+  final int? cp;
+  final int? depth;
+
+  /// The engine's choice here, as a move and as notation.
+  final String? bestMoveUci;
+  final String? bestMoveText;
+
+  /// The move actually played next in this line, and the score it led to.
+  final String? playedMoveText;
+  final int? playedCp;
+
+  const ScorePoint({
+    required this.label,
+    required this.position,
+    this.cp,
+    this.depth,
+    this.bestMoveUci,
+    this.bestMoveText,
+    this.playedMoveText,
+    this.playedCp,
+  });
+
+  /// True when the game followed the engine's recommendation.
+  bool get playedTheBest =>
+      playedMoveText != null && playedMoveText == bestMoveText;
 }
 
 /// Mates are charted as a large magnitude rather than a real score; the chart
@@ -33,14 +74,11 @@ int? redCentipawns(SearchInfo info, {required bool sideToMoveIsRed}) {
 /// i plies from Red's point of view, or null where that position has not been
 /// analysed. Above the centre line means Red stands better.
 class ScoreChart extends StatefulWidget {
-  final List<int?> centipawns;
+  /// One entry per ply of the line, in play order.
+  final List<ScorePoint> points;
 
   /// Ply currently shown on the board, marked on the chart.
   final int currentPly;
-
-  /// Move description per ply, used by the hover readout. Shorter lists (or an
-  /// empty one) simply fall back to the ply number.
-  final List<String> plyLabels;
 
   /// Called with the ply to jump to when the chart is tapped.
   final ValueChanged<int>? onSelect;
@@ -57,9 +95,8 @@ class ScoreChart extends StatefulWidget {
 
   const ScoreChart({
     super.key,
-    required this.centipawns,
+    required this.points,
     required this.currentPly,
-    this.plyLabels = const [],
     this.onSelect,
     this.onAnalyseGame,
     this.onCancelAnalysis,
@@ -69,15 +106,36 @@ class ScoreChart extends StatefulWidget {
 
   bool get isAnalysing => analysedCount != null && analysisTotal != null;
 
-  /// Scores are clamped to this magnitude so one decisive position does not
-  /// flatten the rest of the game.
-  static const double clampCp = 1000;
-
   /// Gutter on the left holds the score labels.
   static const EdgeInsets padding = EdgeInsets.fromLTRB(46, 16, 14, 12);
 
-  /// Values that get a gridline and a label.
-  static const List<double> gridValues = [1000, 500, 0, -500, -1000];
+  /// Vertical ranges the chart will settle on, smallest first.
+  static const List<double> rangeSteps = [
+    50,
+    100,
+    200,
+    300,
+    500,
+    800,
+    1200,
+    2000,
+  ];
+
+  /// The range that fits [scores]: the smallest step covering every ordinary
+  /// score. Mates are ignored here and pinned to the edge instead, so one
+  /// forced win cannot flatten the rest of the game.
+  static double rangeFor(Iterable<int?> scores) {
+    var largest = 0.0;
+    for (final cp in scores) {
+      if (cp == null || cp.abs() >= kMateCentipawns) continue;
+      final magnitude = cp.abs().toDouble();
+      if (magnitude > largest) largest = magnitude;
+    }
+    for (final step in rangeSteps) {
+      if (largest <= step) return step;
+    }
+    return rangeSteps.last;
+  }
 
   @override
   State<ScoreChart> createState() => _ScoreChartState();
@@ -86,10 +144,12 @@ class ScoreChart extends StatefulWidget {
 class _ScoreChartState extends State<ScoreChart> {
   int? _hoverPly;
 
+  List<int?> get _scores => [for (final point in widget.points) point.cp];
+
   @override
   void didUpdateWidget(ScoreChart oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_hoverPly != null && _hoverPly! >= widget.centipawns.length) {
+    if (_hoverPly != null && _hoverPly! >= widget.points.length) {
       _hoverPly = null;
     }
   }
@@ -97,8 +157,9 @@ class _ScoreChartState extends State<ScoreChart> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final centipawns = widget.centipawns;
+    final centipawns = _scores;
     final known = centipawns.where((c) => c != null).length;
+    final range = ScoreChart.rangeFor(centipawns);
 
     final current = centipawns.isEmpty
         ? null
@@ -199,6 +260,7 @@ class _ScoreChartState extends State<ScoreChart> {
                           child: CustomPaint(
                             painter: _ScorePainter(
                               centipawns: centipawns,
+                              range: range,
                               currentPly: widget.currentPly,
                               hoverPly: _hoverPly,
                               lineColor: theme.colorScheme.onSurface,
@@ -212,7 +274,7 @@ class _ScoreChartState extends State<ScoreChart> {
                           ),
                         ),
                         if (_hoverPly != null && centipawns[_hoverPly!] != null)
-                          _hoverCard(context, size, _hoverPly!),
+                          _hoverCard(context, size, _hoverPly!, range),
                       ],
                     ),
                   ),
@@ -232,31 +294,36 @@ class _ScoreChartState extends State<ScoreChart> {
   /// The ply nearest to a tap or pointer at [dx] within a chart [width] wide.
   int plyAt(double dx, double width) {
     final plotWidth = width - ScoreChart.padding.horizontal;
-    if (widget.centipawns.length < 2 || plotWidth <= 0) return 0;
+    if (widget.points.length < 2 || plotWidth <= 0) return 0;
     final t = ((dx - ScoreChart.padding.left) / plotWidth).clamp(0.0, 1.0);
-    return (t * (widget.centipawns.length - 1)).round();
+    return (t * (widget.points.length - 1)).round();
   }
 
-  /// Small readout naming the position under the pointer and its exact score.
-  Widget _hoverCard(BuildContext context, Size size, int ply) {
+  /// Readout for the position under the pointer: what it is, what it is worth,
+  /// how it looks, and how the move played compares with the engine's choice.
+  Widget _hoverCard(BuildContext context, Size size, int ply, double range) {
     final theme = Theme.of(context);
-    final cp = widget.centipawns[ply]!;
+    final point = widget.points[ply];
+    final cp = point.cp!;
     final plot = _plotRect(size);
-    final x = widget.centipawns.length < 2
+    final x = widget.points.length < 2
         ? plot.center.dx
-        : plot.left + plot.width * (ply / (widget.centipawns.length - 1));
+        : plot.left + plot.width * (ply / (widget.points.length - 1));
     final y =
-        plot.center.dy -
-        (cp.clamp(-ScoreChart.clampCp, ScoreChart.clampCp) /
-                ScoreChart.clampCp) *
-            (plot.height / 2);
+        plot.center.dy - (cp.clamp(-range, range) / range) * (plot.height / 2);
 
-    const cardWidth = 150.0;
+    // A preview only earns its space when the chart is tall enough for it.
+    final showBoard = size.height >= 190;
+    const cardWidth = 172.0;
+    final cardHeight = showBoard ? 232.0 : 96.0;
     final left = (x + 12).clamp(
       0.0,
       (size.width - cardWidth).clamp(0.0, size.width),
     );
-    final top = (y - 52).clamp(0.0, (size.height - 48).clamp(0.0, size.height));
+    final top = (y - cardHeight / 2).clamp(
+      0.0,
+      (size.height - cardHeight).clamp(0.0, size.height),
+    );
 
     return Positioned(
       left: left,
@@ -281,26 +348,81 @@ class _ScoreChartState extends State<ScoreChart> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                plyLabel(ply),
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      point.label,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text(
+                    scoreLabel(cp),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.bold,
+                      color: cp >= 0
+                          ? Colors.red.shade600
+                          : theme.colorScheme.onSurface,
+                    ),
+                  ),
+                ],
               ),
-              Text(
-                scoreLabel(cp),
-                style: TextStyle(
-                  fontSize: 13,
-                  fontFamily: 'monospace',
-                  fontWeight: FontWeight.bold,
-                  color: cp >= 0
-                      ? Colors.red.shade600
-                      : theme.colorScheme.onSurface,
+              if (showBoard) ...[
+                const SizedBox(height: 4),
+                // The board as it stood, with the engine's move drawn on it.
+                SizedBox(
+                  width: cardWidth - 16,
+                  child: BoardWidget(
+                    position: point.position,
+                    arrows: [
+                      if (point.bestMoveUci != null &&
+                          point.bestMoveUci!.length >= 4)
+                        BoardArrow(
+                          from: Position.uciToSquare(
+                            point.bestMoveUci!.substring(0, 2),
+                          )!,
+                          to: Position.uciToSquare(
+                            point.bestMoveUci!.substring(2, 4),
+                          )!,
+                          side: point.position.sideToMove,
+                          label: '1',
+                        ),
+                    ],
+                  ),
                 ),
-              ),
+              ],
+              const SizedBox(height: 4),
+              if (point.bestMoveText != null)
+                _moveRow(
+                  theme,
+                  colour: Colors.green.shade600,
+                  label: 'Best',
+                  move: point.bestMoveText!,
+                  score: cp,
+                ),
+              if (point.playedMoveText != null && !point.playedTheBest)
+                _moveRow(
+                  theme,
+                  colour: Colors.amber.shade700,
+                  label: 'Played',
+                  move: point.playedMoveText!,
+                  score: point.playedCp,
+                )
+              else if (point.playedTheBest)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    'Played the engine\'s move',
+                    style: TextStyle(fontSize: 11, color: theme.hintColor),
+                  ),
+                ),
             ],
           ),
         ),
@@ -308,9 +430,54 @@ class _ScoreChartState extends State<ScoreChart> {
     );
   }
 
-  String plyLabel(int ply) {
-    if (ply < widget.plyLabels.length) return widget.plyLabels[ply];
-    return ply == 0 ? 'Start' : 'Ply $ply';
+  /// One labelled move line in the readout, colour-coded so the engine's
+  /// choice and what was actually played cannot be confused.
+  Widget _moveRow(
+    ThemeData theme, {
+    required Color colour,
+    required String label,
+    required String move,
+    required int? score,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: colour),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: theme.hintColor,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              move,
+              style: const TextStyle(fontSize: 12),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (score != null)
+            Text(
+              scoreLabel(score),
+              style: TextStyle(
+                fontSize: 11,
+                fontFamily: 'monospace',
+                color: theme.hintColor,
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   Rect _plotRect(Size size) => Rect.fromLTRB(
@@ -329,6 +496,7 @@ String scoreLabel(int cp) {
 
 class _ScorePainter extends CustomPainter {
   final List<int?> centipawns;
+  final double range;
   final int currentPly;
   final int? hoverPly;
   final Color lineColor;
@@ -339,6 +507,7 @@ class _ScorePainter extends CustomPainter {
 
   _ScorePainter({
     required this.centipawns,
+    required this.range,
     required this.currentPly,
     required this.hoverPly,
     required this.lineColor,
@@ -361,7 +530,8 @@ class _ScorePainter extends CustomPainter {
 
     final zeroY = _y(0, plot);
 
-    for (final value in ScoreChart.gridValues) {
+    // Gridlines follow the range in use: the edges and their halves.
+    for (final value in [range, range / 2, 0.0, -range / 2, -range]) {
       final y = _y(value, plot);
       final isZero = value == 0;
       canvas.drawLine(
@@ -375,7 +545,7 @@ class _ScorePainter extends CustomPainter {
       );
       _label(
         canvas,
-        value == 0 ? '0' : '${value > 0 ? '+' : ''}${value.toInt()}',
+        value == 0 ? '0' : '${value > 0 ? '+' : ''}${value.round()}',
         Offset(plot.left - 6, y),
         isZero,
       );
@@ -492,14 +662,16 @@ class _ScorePainter extends CustomPainter {
   }
 
   double _y(double cp, Rect plot) {
-    final clamped = cp.clamp(-ScoreChart.clampCp, ScoreChart.clampCp);
-    return plot.center.dy - (clamped / ScoreChart.clampCp) * (plot.height / 2);
+    // Mates land on the edge rather than dragging the scale out to 20000.
+    final clamped = cp.clamp(-range, range);
+    return plot.center.dy - (clamped / range) * (plot.height / 2);
   }
 
   @override
   bool shouldRepaint(covariant _ScorePainter oldDelegate) =>
       oldDelegate.currentPly != currentPly ||
       oldDelegate.hoverPly != hoverPly ||
+      oldDelegate.range != range ||
       oldDelegate.lineColor != lineColor ||
       !_sameScores(oldDelegate.centipawns, centipawns);
 

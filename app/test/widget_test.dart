@@ -617,6 +617,30 @@ void main() {
   });
 
   group('Score chart', () {
+    /// Chart points for a line of scores, with optional labels and moves.
+    List<ScorePoint> _points(
+      List<int?> scores, {
+      List<String> labels = const [],
+      List<String?> best = const [],
+      List<String?> played = const [],
+    }) {
+      var position = Position.startPosition();
+      return [
+        for (var i = 0; i < scores.length; i++)
+          ScorePoint(
+            label: i < labels.length
+                ? labels[i]
+                : (i == 0 ? 'Start' : 'Ply $i'),
+            position: position,
+            cp: scores[i],
+            bestMoveUci: i < best.length ? best[i] : null,
+            bestMoveText: i < best.length && best[i] != null ? 'best$i' : null,
+            playedMoveText: i < played.length ? played[i] : null,
+            playedCp: i + 1 < scores.length ? scores[i + 1] : null,
+          ),
+      ];
+    }
+
     test('scores are charted from Red\'s point of view', () {
       final info = _line(12, scoreCp: 40, pv: 'b0c2');
       expect(redCentipawns(info, sideToMoveIsRed: true), 40);
@@ -652,9 +676,9 @@ void main() {
 
     testWidgets('prompts when nothing has been analysed', (tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
+        MaterialApp(
           home: Scaffold(
-            body: ScoreChart(centipawns: [null, null], currentPly: 0),
+            body: ScoreChart(points: _points([null, null]), currentPly: 0),
           ),
         ),
       );
@@ -663,9 +687,12 @@ void main() {
 
     testWidgets('plots what is known and reports the coverage', (tester) async {
       await tester.pumpWidget(
-        const MaterialApp(
+        MaterialApp(
           home: Scaffold(
-            body: ScoreChart(centipawns: [20, null, -140, 65], currentPly: 2),
+            body: ScoreChart(
+              points: _points([20, null, -140, 65]),
+              currentPly: 2,
+            ),
           ),
         ),
       );
@@ -674,18 +701,22 @@ void main() {
       expect(find.text('-140'), findsOneWidget);
     });
 
-    testWidgets('labels the score axis', (tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: ScoreChart(centipawns: [20, -300], currentPly: 0),
-          ),
-        ),
+    test('the vertical range grows to fit, and mates do not stretch it', () {
+      // A quiet game stays on a tight scale ...
+      expect(ScoreChart.rangeFor([20, -35, 48]), 50);
+      // ... and the range steps up only as far as it must.
+      expect(ScoreChart.rangeFor([20, -120]), 200);
+      expect(ScoreChart.rangeFor([20, 250, -80]), 300);
+      expect(ScoreChart.rangeFor([1500]), 2000);
+      // A forced mate pins to the edge instead of dragging the scale to 20000.
+      expect(ScoreChart.rangeFor([20, kMateCentipawns]), 50);
+      expect(
+        ScoreChart.rangeFor([-kMateCentipawns]),
+        ScoreChart.rangeSteps.first,
       );
-      // Axis labels are painted, so assert the values the chart advertises.
-      expect(ScoreChart.gridValues, contains(0));
-      expect(ScoreChart.gridValues, containsAll([1000.0, 500.0, -500.0]));
-      // The gutter must be wide enough to hold "+1000".
+      // Nothing analysed yet still gives a usable scale.
+      expect(ScoreChart.rangeFor([null, null]), ScoreChart.rangeSteps.first);
+      // The gutter must be wide enough for the largest label.
       expect(ScoreChart.padding.left, greaterThan(30));
     });
 
@@ -693,11 +724,13 @@ void main() {
       tester,
     ) async {
       await tester.pumpWidget(
-        const MaterialApp(
+        MaterialApp(
           home: Scaffold(
             body: ScoreChart(
-              centipawns: [10, -25, 340],
-              plyLabels: ['Start', '1. 炮二平五', '1... 马8进7'],
+              points: _points(
+                [10, -25, 340],
+                labels: ['Start', '1. 炮二平五', '1... 马8进7'],
+              ),
               currentPly: 0,
             ),
           ),
@@ -727,6 +760,79 @@ void main() {
       expect(find.text('1. 炮二平五'), findsNothing);
     });
 
+    testWidgets('the hover readout previews the board and compares moves', (
+      tester,
+    ) async {
+      // A tall chart, so the preview earns its place.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 320,
+              child: ScoreChart(
+                points: _points(
+                  [40, -60, 20],
+                  labels: ['Start', '1. 炮二平五', '1... 马8进7'],
+                  best: ['h2e2', 'b9c7', null],
+                  played: ['炮二平五', '马8进7', null],
+                ),
+                currentPly: 0,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final rect = tester.getRect(find.byType(CustomPaint).last);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(Offset(rect.left + 20, rect.center.dy));
+      await tester.pump();
+
+      // The engine's move and what was played are labelled apart ...
+      expect(find.text('Best'), findsOneWidget);
+      expect(find.text('Played'), findsOneWidget);
+      expect(find.text('best0'), findsOneWidget);
+      expect(find.text('炮二平五'), findsOneWidget);
+      // ... with the score each leads to.
+      expect(find.text('+40'), findsWidgets);
+      expect(find.text('-60'), findsWidgets);
+      // A board preview is drawn, with the engine's move on it.
+      expect(find.byType(BoardWidget), findsOneWidget);
+      final board = tester.widget<BoardWidget>(find.byType(BoardWidget));
+      expect(board.arrows, hasLength(1));
+      expect(board.arrows.single.side, PieceColor.red);
+    });
+
+    testWidgets('a short chart drops the preview but keeps the numbers', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 120,
+              child: ScoreChart(
+                points: _points([40, -60], best: ['h2e2', null]),
+                currentPly: 0,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final rect = tester.getRect(find.byType(CustomPaint).last);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(Offset(rect.left + 10, rect.center.dy));
+      await tester.pump();
+
+      expect(find.byType(BoardWidget), findsNothing);
+      expect(find.text('Best'), findsOneWidget);
+    });
+
     testWidgets('offers whole-game analysis and reports its progress', (
       tester,
     ) async {
@@ -736,7 +842,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ScoreChart(
-              centipawns: const [null, null, null],
+              points: _points([null, null, null]),
               currentPly: 0,
               onAnalyseGame: () => started++,
               onCancelAnalysis: () => cancelled++,
@@ -756,7 +862,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ScoreChart(
-              centipawns: const [12, null, null],
+              points: _points([12, null, null]),
               currentPly: 0,
               onAnalyseGame: () => started++,
               onCancelAnalysis: () => cancelled++,
@@ -779,7 +885,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ScoreChart(
-              centipawns: const [0, 50, 100, 150, 200],
+              points: _points([0, 50, 100, 150, 200]),
               currentPly: 0,
               onSelect: (ply) => selected = ply,
             ),
