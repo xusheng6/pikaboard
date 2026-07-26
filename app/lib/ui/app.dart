@@ -18,8 +18,16 @@ class PikaboardApp extends StatelessWidget {
       title: 'Pikaboard',
       theme: ThemeData(
         colorSchemeSeed: Colors.red.shade800,
+        brightness: Brightness.light,
         useMaterial3: true,
       ),
+      darkTheme: ThemeData(
+        colorSchemeSeed: Colors.red.shade800,
+        brightness: Brightness.dark,
+        useMaterial3: true,
+      ),
+      // Dark is the default; a later setting will make this configurable.
+      themeMode: ThemeMode.dark,
       home: const PikaboardScreen(),
     );
   }
