@@ -159,6 +159,22 @@ class MoveRules {
     return !isInCheck(applyMove(pos, from, to), piece.color);
   }
 
+  /// True when [uci] could be played in [pos].
+  ///
+  /// Used to spot engine output that belongs to a position the app has already
+  /// moved on from: a search's last lines can arrive after the next search has
+  /// been started, and crediting them to the wrong position flips the score's
+  /// sign.
+  static bool fitsPosition(Position pos, String uci) {
+    if (uci.length < 4) return false;
+    final from = Position.uciToSquare(uci.substring(0, 2));
+    final to = Position.uciToSquare(uci.substring(2, 4));
+    if (from == null || to == null) return false;
+    final piece = pos.pieceAt(from);
+    if (piece == null || piece.color != pos.sideToMove) return false;
+    return isPseudoLegal(pos, from, to);
+  }
+
   /// Every square the piece on [from] may legally move to.
   static List<int> legalDestinations(Position pos, int from) {
     return [

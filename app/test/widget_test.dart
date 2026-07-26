@@ -462,6 +462,23 @@ void main() {
       expect(legal(blocked, 'e5e6'), isTrue); // still on the file, still legal
     });
 
+    test('engine output is matched against the position it claims', () {
+      final start = Position.startPosition();
+      // A move Red can play here belongs to this position ...
+      expect(MoveRules.fitsPosition(start, 'h2e2'), isTrue);
+      // ... while Black's reply does not, which is how trailing output from
+      // the previous search is spotted before its score flips a sign.
+      expect(MoveRules.fitsPosition(start, 'h9g7'), isFalse);
+      // Nor does a move that is merely illegal, or malformed.
+      expect(MoveRules.fitsPosition(start, 'a0a5'), isFalse);
+      expect(MoveRules.fitsPosition(start, 'e4e5'), isFalse);
+      expect(MoveRules.fitsPosition(start, 'xx'), isFalse);
+
+      final afterMove = MoveNotation.applyUciMove(start, 'h2e2');
+      expect(MoveRules.fitsPosition(afterMove, 'h9g7'), isTrue);
+      expect(MoveRules.fitsPosition(afterMove, 'b0c2'), isFalse);
+    });
+
     test('legalDestinations lists every square a piece can reach', () {
       final lone = board({'e5': 'R'});
       // A rook alone on e5 reaches the whole file and rank: 9 + 8 squares.
@@ -903,6 +920,31 @@ void main() {
       expect(game.root.children.length, 1);
       expect(game.root.children.single, first);
     });
+
+    test(
+      'the line through a node covers the whole game, not just its past',
+      () {
+        final game = Game.fromMoves(Position.startPosition(), [
+          'h2e2',
+          'h9g7',
+          'b0c2',
+          'b9c7',
+        ]);
+        final middle = game.root.children.first.children.first;
+
+        // The chart plots this: a fixed-length line the cursor slides along,
+        // rather than only the moves played so far.
+        final line = middle.mainlineEnd.pathFromRoot;
+        expect(line.length, 5); // root plus four moves
+        expect(line[middle.ply], middle);
+        expect(line.first.isRoot, isTrue);
+        expect(line.last.children, isEmpty);
+
+        // It stays the same length wherever you stand on that line.
+        expect(game.root.mainlineEnd.pathFromRoot.length, line.length);
+        expect(line.last.mainlineEnd.pathFromRoot.length, line.length);
+      },
+    );
 
     test('nodes know their ply, move number and side', () {
       final game = Game.fromMoves(Position.startPosition(), [

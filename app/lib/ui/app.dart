@@ -117,10 +117,20 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   /// Root-first nodes leading to the position on the board.
   List<GameNode> get _path => _current.pathFromRoot;
 
+  /// The whole line the board is on, start to finish.
+  ///
+  /// The score chart plots this rather than just the moves played so far, so
+  /// stepping through the game slides the cursor along a fixed graph instead
+  /// of redrawing a shorter one each time.
+  List<GameNode> get _line => _current.mainlineEnd.pathFromRoot;
+
   int? _selectedSquare;
   bool _isAnalyzing = false;
   bool _engineReady = false;
   bool _restartPending = false; // true when stop() is called for a restart
+
+  // Bumped per restart so an older one cannot resume over a newer one.
+  int _searchGeneration = 0;
   bool _isSetupMode = false;
   PieceColor _setupColor = PieceColor.red;
 
@@ -164,12 +174,12 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   /// Score of every position in the game so far, in play order; null where a
   /// position has not been analysed.
   List<int?> get _scoreByPly => [
-    for (final node in _path) _evalByFen[node.position.toFen()]?.cp,
+    for (final node in _line) _evalByFen[node.position.toFen()]?.cp,
   ];
 
   /// Name for each ply, e.g. "3. 炮二平五" — used by the chart's hover readout.
   List<String> get _plyLabels => [
-    for (final node in _path)
+    for (final node in _line)
       if (node.move == null || node.parent == null)
         'Start'
       else
@@ -333,6 +343,15 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         // Drop trailing output from a search that was stopped for a restart,
         // so old high-depth lines don't leak into the new position's table.
         if (_restartPending) return;
+        // A search's last lines can arrive after the next one has started. If
+        // the line cannot be played here it belongs to a position we have
+        // moved on from, and crediting it would flip the score's sign.
+        final searched = _enginePosition;
+        if (searched != null &&
+            info.pv.isNotEmpty &&
+            !MoveRules.fitsPosition(searched, info.pv.first)) {
+          return;
+        }
         setState(() {
           if (info.pv.isNotEmpty) {
             _curByDepth[info.depth] = info;
@@ -436,16 +455,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _latestBestMove = null;
       _bestUci = null;
       _ponderUci = null;
-      _restartPending = true;
-      _engine.stop();
-      Future.delayed(const Duration(milliseconds: 100), () {
-        if (mounted) {
-          setState(() {
-            _restartPending = false;
-            _startEngineSearch(newPos);
-          });
-        }
-      });
+      _restartSearch(newPos);
     } else {
       _bestUci = null;
       _ponderUci = null;
@@ -528,9 +538,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
   /// Jump to a ply on the current line, used by the score chart.
   void _goToPly(int ply) {
-    final path = _path;
-    if (ply < 0 || ply >= path.length) return;
-    _goToNode(path[ply]);
+    final line = _line;
+    if (ply < 0 || ply >= line.length) return;
+    _goToNode(line[ply]);
   }
 
   /// Drop [node] and everything after it, falling back to its parent.
@@ -567,16 +577,27 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     _latestBestMove = null;
     _bestUci = null;
     _ponderUci = null;
+    _restartSearch(_position);
+  }
+
+  /// Point the running search at [target].
+  ///
+  /// Waits for the stopped search to report its bestmove — UCI's guarantee
+  /// that nothing more is coming — rather than guessing with a timer, so its
+  /// trailing lines cannot be credited to the new position.
+  Future<void> _restartSearch(Position target) async {
+    final generation = ++_searchGeneration;
     _restartPending = true;
     _engine.stop();
-    final target = _position;
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (mounted) {
-        setState(() {
-          _restartPending = false;
-          _startEngineSearch(target);
-        });
-      }
+    await _engine.bestMove.first.timeout(
+      const Duration(seconds: 3),
+      onTimeout: () => const BestMove(move: ''),
+    );
+    // A newer restart took over while waiting.
+    if (!mounted || generation != _searchGeneration) return;
+    setState(() {
+      _restartPending = false;
+      _startEngineSearch(target);
     });
   }
 
