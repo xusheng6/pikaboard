@@ -8,6 +8,7 @@ import 'package:app/models/position.dart';
 import 'package:app/models/settings.dart';
 import 'package:app/services/chessdb.dart';
 import 'package:app/ui/analysis_panel.dart';
+import 'package:app/ui/board_widget.dart';
 import 'package:app/ui/move_list.dart';
 
 SearchInfo _line(int depth, {int scoreCp = 0, required String pv}) {
@@ -202,6 +203,40 @@ void main() {
       expect(find.byType(Opacity), findsWidgets);
     });
 
+    testWidgets('best move and search stats sit below the table', (
+      tester,
+    ) async {
+      final start = Position.startPosition();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AnalysisPanel(
+              lines: [
+                AnalysisLine(
+                  info: _line(12, scoreCp: 40, pv: 'b0c2 b9c7'),
+                  position: start,
+                ),
+              ],
+              bestMove: const BestMove(move: 'b0c2', ponder: 'b9c7'),
+              position: start,
+            ),
+          ),
+        ),
+      );
+
+      final yRow = tester.getTopLeft(find.text('12')).dy;
+      final best = find.textContaining('Best:');
+      expect(best, findsOneWidget);
+      expect(tester.widget<Text>(best).data, contains('Ponder:'));
+      expect(tester.getTopLeft(best).dy, greaterThan(yRow));
+      // The stats row is a RichText, so match on its plain text.
+      final nps = find.byWidgetPredicate(
+        (w) => w is RichText && w.text.toPlainText().startsWith('NPS'),
+      );
+      expect(nps, findsOneWidget);
+      expect(tester.getTopLeft(nps).dy, greaterThan(yRow));
+    });
+
     testWidgets('shows prompt when empty', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -211,6 +246,78 @@ void main() {
         ),
       );
       expect(find.textContaining('Press Analyze'), findsOneWidget);
+    });
+  });
+
+  group('Settings', () {
+    test('defaults to large text with every highlight on', () {
+      const d = Settings();
+      expect(d.fontSize, FontSizeSetting.large);
+      expect(d.fontSize.scale, greaterThan(FontSizeSetting.medium.scale));
+      expect(d.highlightLastMove, isTrue);
+      expect(d.highlightBestMove, isTrue);
+      expect(d.highlightPonderMove, isTrue);
+    });
+
+    test('json round-trip preserves the new fields', () {
+      const s = Settings(
+        fontSize: FontSizeSetting.small,
+        highlightLastMove: false,
+        highlightBestMove: true,
+        highlightPonderMove: false,
+      );
+      final back = Settings.fromJson(s.toJson());
+      expect(back.fontSize, FontSizeSetting.small);
+      expect(back.highlightLastMove, isFalse);
+      expect(back.highlightBestMove, isTrue);
+      expect(back.highlightPonderMove, isFalse);
+    });
+
+    test('settings files written before these options keep the defaults', () {
+      final s = Settings.fromJson({'theme': 'light'});
+      expect(s.theme, ThemeSetting.light);
+      expect(s.fontSize, FontSizeSetting.large);
+      expect(s.highlightLastMove, isTrue);
+      expect(s.highlightPonderMove, isTrue);
+    });
+  });
+
+  group('BoardWidget highlights', () {
+    /// Counts squares ringed in [color], the border used by the move
+    /// highlights (pieces use red/black borders).
+    int ringsOf(WidgetTester tester, Color color) {
+      return tester.widgetList<Container>(find.byType(Container)).where((c) {
+        final d = c.decoration;
+        return d is BoxDecoration && d.border?.top.color == color;
+      }).length;
+    }
+
+    testWidgets('best move is green and the ponder reply blue', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BoardWidget(
+              position: Position.startPosition(),
+              highlightFrom: 1,
+              highlightTo: 20,
+              ponderFrom: 82,
+              ponderTo: 65,
+            ),
+          ),
+        ),
+      );
+      expect(ringsOf(tester, Colors.green.shade700), 2);
+      expect(ringsOf(tester, Colors.blue.shade700), 2);
+    });
+
+    testWidgets('omitted squares draw no highlight', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: BoardWidget(position: Position.startPosition())),
+        ),
+      );
+      expect(ringsOf(tester, Colors.green.shade700), 0);
+      expect(ringsOf(tester, Colors.blue.shade700), 0);
     });
   });
 

@@ -62,6 +62,14 @@ class _PikaboardAppState extends State<PikaboardApp> {
         useMaterial3: true,
       ),
       themeMode: _themeMode,
+      // Apply the font-size preference to every route, including settings.
+      builder: (context, child) {
+        return MediaQuery.withClampedTextScaling(
+          minScaleFactor: _settings.fontSize.scale,
+          maxScaleFactor: _settings.fontSize.scale,
+          child: child!,
+        );
+      },
       home: PikaboardScreen(settings: _settings, onSettingsChanged: _update),
     );
   }
@@ -160,9 +168,35 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   StreamSubscription<SearchInfo>? _infoSub;
   StreamSubscription<BestMove>? _bestMoveSub;
 
-  // For highlighting the best move
-  int? _bestMoveFrom;
-  int? _bestMoveTo;
+  // Engine's best move and the opponent's best reply (the ponder move), in
+  // UCI. Both come from the running search's PV and are refreshed by the final
+  // bestmove; the board highlights derive from them.
+  String? _bestUci;
+  String? _ponderUci;
+
+  static int? _uciSquare(String? uci, int offset) {
+    if (uci == null || uci.length < offset + 2) return null;
+    return Position.uciToSquare(uci.substring(offset, offset + 2));
+  }
+
+  int? get _bestMoveFrom => _uciSquare(_bestUci, 0);
+  int? get _bestMoveTo => _uciSquare(_bestUci, 2);
+  int? get _ponderMoveFrom => _uciSquare(_ponderUci, 0);
+  int? get _ponderMoveTo => _uciSquare(_ponderUci, 2);
+
+  /// True when the engine's output describes the position currently shown.
+  bool get _engineMatchesBoard =>
+      _enginePosition != null && _enginePosition!.toFen() == _position.toFen();
+
+  /// True when the engine's best move can be played on the board shown, i.e.
+  /// the search that produced it was for this exact position.
+  bool get _canPlayBestMove =>
+      _bestUci != null && !_isSetupMode && _engineMatchesBoard;
+
+  void _playBestMove() {
+    if (!_canPlayBestMove) return;
+    _playUci(_bestUci!);
+  }
 
   // For highlighting the last move played
   int? _lastMoveFrom;
@@ -185,14 +219,11 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         // so old high-depth lines don't leak into the new position's table.
         if (_restartPending) return;
         setState(() {
-          if (info.pv.isNotEmpty) _curByDepth[info.depth] = info;
-          // Highlight best move from PV
           if (info.pv.isNotEmpty) {
-            final move = info.pv.first;
-            if (move.length >= 4) {
-              _bestMoveFrom = Position.uciToSquare(move.substring(0, 2));
-              _bestMoveTo = Position.uciToSquare(move.substring(2, 4));
-            }
+            _curByDepth[info.depth] = info;
+            // The PV's first two plies are the best move and the best reply.
+            _bestUci = info.pv.first;
+            _ponderUci = info.pv.length > 1 ? info.pv[1] : null;
           }
         });
       });
@@ -200,6 +231,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         if (_restartPending) return; // ignore bestmove from a stop-for-restart
         setState(() {
           _latestBestMove = bm;
+          _bestUci = bm.move;
+          _ponderUci = bm.ponder;
           _isAnalyzing = false;
         });
       });
@@ -286,8 +319,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     // position) until the new search demotes them to the stale list.
     if (_isAnalyzing) {
       _latestBestMove = null;
-      _bestMoveFrom = null;
-      _bestMoveTo = null;
+      _bestUci = null;
+      _ponderUci = null;
       _restartPending = true;
       _engine.stop();
       Future.delayed(const Duration(milliseconds: 100), () {
@@ -299,8 +332,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         }
       });
     } else {
-      _bestMoveFrom = null;
-      _bestMoveTo = null;
+      _bestUci = null;
+      _ponderUci = null;
     }
   }
 
@@ -407,13 +440,13 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   /// If analyzing, restart analysis on the current position.
   void _restartAnalysisIfNeeded() {
     if (!_isAnalyzing) {
-      _bestMoveFrom = null;
-      _bestMoveTo = null;
+      _bestUci = null;
+      _ponderUci = null;
       return;
     }
     _latestBestMove = null;
-    _bestMoveFrom = null;
-    _bestMoveTo = null;
+    _bestUci = null;
+    _ponderUci = null;
     _restartPending = true;
     _engine.stop();
     final target = _position;
@@ -531,8 +564,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _isAnalyzing = true;
       _latestBestMove = null;
       _staleLines = [];
-      _bestMoveFrom = null;
-      _bestMoveTo = null;
+      _bestUci = null;
+      _ponderUci = null;
       _selectedSquare = null;
       _startEngineSearch(_position);
     });
@@ -565,8 +598,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _curByDepth.clear();
       _staleLines = [];
       _enginePosition = null;
-      _bestMoveFrom = null;
-      _bestMoveTo = null;
+      _bestUci = null;
+      _ponderUci = null;
       _lastMoveFrom = null;
       _lastMoveTo = null;
     });
@@ -583,8 +616,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _curByDepth.clear();
       _staleLines = [];
       _enginePosition = null;
-      _bestMoveFrom = null;
-      _bestMoveTo = null;
+      _bestUci = null;
+      _ponderUci = null;
       _lastMoveFrom = null;
       _lastMoveTo = null;
     });
@@ -603,8 +636,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         _curByDepth.clear();
         _staleLines = [];
         _enginePosition = null;
-        _bestMoveFrom = null;
-        _bestMoveTo = null;
+        _bestUci = null;
+        _ponderUci = null;
         _lastMoveFrom = null;
         _lastMoveTo = null;
       });
@@ -630,6 +663,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = widget.settings;
     // On mobile the board fills the phone width (430 also caps it on iPad);
     // on desktop there is room to make it noticeably larger.
     final bool isDesktop =
@@ -642,12 +676,16 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
           builder: (context, constraints) {
             // Cap the board's height so it shrinks to fit short windows
             // instead of overflowing; leave room for the control rows and a
-            // usable analysis panel below. The ceiling matches maxBoardWidth's
-            // 9:10 aspect so height, not the ceiling, is what caps a big board.
-            final double boardMaxHeight = (constraints.maxHeight - 340).clamp(
-              160.0,
-              isDesktop ? 760.0 : 620.0,
-            );
+            // usable analysis panel below. The reserve follows the text scale
+            // since those rows grow with the font size. The ceiling matches
+            // maxBoardWidth's 9:10 aspect so height, not the ceiling, is what
+            // caps a big board.
+            final textScaler = MediaQuery.textScalerOf(context);
+            final double boardMaxHeight =
+                (constraints.maxHeight - textScaler.scale(340)).clamp(
+                  160.0,
+                  isDesktop ? 760.0 : 620.0,
+                );
             return Column(
               children: [
                 // FEN input
@@ -698,12 +736,28 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                       child: BoardWidget(
                         position: _position,
                         selectedSquare: _selectedSquare,
-                        highlightFrom: _bestMoveFrom,
-                        highlightTo: _bestMoveTo,
-                        lastMoveFrom: _lastMoveFrom,
-                        lastMoveTo: _lastMoveTo,
+                        // Each highlight is independently switchable in
+                        // settings; when off the squares are simply not passed.
+                        highlightFrom: settings.highlightBestMove
+                            ? _bestMoveFrom
+                            : null,
+                        highlightTo: settings.highlightBestMove
+                            ? _bestMoveTo
+                            : null,
+                        lastMoveFrom: settings.highlightLastMove
+                            ? _lastMoveFrom
+                            : null,
+                        lastMoveTo: settings.highlightLastMove
+                            ? _lastMoveTo
+                            : null,
+                        ponderFrom: settings.highlightPonderMove
+                            ? _ponderMoveFrom
+                            : null,
+                        ponderTo: settings.highlightPonderMove
+                            ? _ponderMoveTo
+                            : null,
                         onSquareTap: _onSquareTap,
-                        language: widget.settings.language,
+                        language: settings.language,
                       ),
                     ),
                   ),
@@ -757,21 +811,25 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                   ),
                   child: Row(
                     children: [
+                      // Single button that starts or stops the search.
                       Expanded(
                         child: FilledButton.icon(
-                          onPressed: _engineReady && !_isAnalyzing
-                              ? _startAnalysis
-                              : null,
-                          icon: const Icon(Icons.play_arrow, size: 18),
-                          label: const Text('Analyze'),
+                          onPressed: !_engineReady
+                              ? null
+                              : (_isAnalyzing ? _stopAnalysis : _startAnalysis),
+                          icon: Icon(
+                            _isAnalyzing ? Icons.stop : Icons.play_arrow,
+                            size: 18,
+                          ),
+                          label: Text(_isAnalyzing ? 'Stop' : 'Analyze'),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: OutlinedButton.icon(
-                          onPressed: _isAnalyzing ? _stopAnalysis : null,
-                          icon: const Icon(Icons.stop, size: 18),
-                          label: const Text('Stop'),
+                          onPressed: _canPlayBestMove ? _playBestMove : null,
+                          icon: const Icon(Icons.done_all, size: 18),
+                          label: const Text('Play Best'),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -847,7 +905,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                 // Move list (only once moves have been played)
                 if (_history.length > 1)
                   ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 64),
+                    constraints: BoxConstraints(
+                      maxHeight: textScaler.scale(64),
+                    ),
                     child: MoveList(
                       history: _history,
                       currentIndex: _historyIndex,
@@ -872,15 +932,24 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         Expanded(
                           child: TabBarView(
                             children: [
-                              SingleChildScrollView(
-                                child: AnalysisPanel(
-                                  lines: _analysisLines,
-                                  bestMove: _latestBestMove,
-                                  position: _enginePosition ?? _position,
-                                  language: widget.settings.language,
-                                  scorePerspective:
-                                      widget.settings.scorePerspective,
-                                ),
+                              // Scrolls internally so its stats row can stay
+                              // pinned to the bottom.
+                              AnalysisPanel(
+                                lines: _analysisLines,
+                                // While the search runs there is no bestmove
+                                // yet, so show the PV's current best/reply.
+                                bestMove:
+                                    _latestBestMove ??
+                                    (_bestUci == null
+                                        ? null
+                                        : BestMove(
+                                            move: _bestUci!,
+                                            ponder: _ponderUci,
+                                          )),
+                                position: _enginePosition ?? _position,
+                                bestMoveStale: !_engineMatchesBoard,
+                                language: settings.language,
+                                scorePerspective: settings.scorePerspective,
                               ),
                               SingleChildScrollView(
                                 child: CandidateMoves(

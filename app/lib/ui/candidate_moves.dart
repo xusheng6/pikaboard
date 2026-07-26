@@ -125,7 +125,7 @@ class _CandidateMovesState extends State<CandidateMoves> {
         child: Row(
           children: [
             SizedBox(
-              width: 76,
+              width: MediaQuery.textScalerOf(context).scale(76),
               child: Text(
                 notation,
                 style: const TextStyle(
@@ -136,7 +136,7 @@ class _CandidateMovesState extends State<CandidateMoves> {
             ),
             const SizedBox(width: 8),
             SizedBox(
-              width: 56,
+              width: MediaQuery.textScalerOf(context).scale(56),
               child: Text(
                 '${shownScore >= 0 ? '+' : ''}$shownScore',
                 style: TextStyle(

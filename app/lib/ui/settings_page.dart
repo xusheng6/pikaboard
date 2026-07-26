@@ -40,6 +40,14 @@ class _SettingsPageState extends State<SettingsPage> {
               onTap: () => _apply(_current.copyWith(theme: t)),
             ),
           const Divider(),
+          _sectionHeader(context, 'Font size'),
+          for (final f in FontSizeSetting.values)
+            _choice(
+              label: _fontSizeLabel(f),
+              selected: _current.fontSize == f,
+              onTap: () => _apply(_current.copyWith(fontSize: f)),
+            ),
+          const Divider(),
           _sectionHeader(context, 'Display language'),
           for (final l in DisplayLanguage.values)
             _choice(
@@ -47,6 +55,26 @@ class _SettingsPageState extends State<SettingsPage> {
               selected: _current.language == l,
               onTap: () => _apply(_current.copyWith(language: l)),
             ),
+          const Divider(),
+          _sectionHeader(context, 'Board highlights'),
+          SwitchListTile(
+            title: const Text('Last move played'),
+            subtitle: const Text('Amber — the move that led to this position'),
+            value: _current.highlightLastMove,
+            onChanged: (v) => _apply(_current.copyWith(highlightLastMove: v)),
+          ),
+          SwitchListTile(
+            title: const Text('Best move'),
+            subtitle: const Text("Green — engine's move for the side to move"),
+            value: _current.highlightBestMove,
+            onChanged: (v) => _apply(_current.copyWith(highlightBestMove: v)),
+          ),
+          SwitchListTile(
+            title: const Text('Best reply (ponder)'),
+            subtitle: const Text("Blue — opponent's best answer to it"),
+            value: _current.highlightPonderMove,
+            onChanged: (v) => _apply(_current.copyWith(highlightPonderMove: v)),
+          ),
           const Divider(),
           _sectionHeader(context, 'Score perspective'),
           for (final s in ScorePerspective.values)
@@ -94,6 +122,19 @@ class _SettingsPageState extends State<SettingsPage> {
         return 'Dark';
       case ThemeSetting.auto:
         return 'System (auto)';
+    }
+  }
+
+  static String _fontSizeLabel(FontSizeSetting f) {
+    switch (f) {
+      case FontSizeSetting.small:
+        return 'Small';
+      case FontSizeSetting.medium:
+        return 'Medium';
+      case FontSizeSetting.large:
+        return 'Large (default)';
+      case FontSizeSetting.extraLarge:
+        return 'Extra large';
     }
   }
 

@@ -26,11 +26,17 @@ import '../models/settings.dart';
   return (text: '${cp >= 0 ? '+' : ''}$cp', positive: cp >= 0);
 }
 
-// Shared column widths so the header and every row line up.
+// Shared column widths so the header and every row line up. They are sized for
+// unscaled text, so run them through [_w] to follow the font-size setting.
 const double _kDepthWidth = 46;
 const double _kScoreWidth = 64;
 const double _kTimeWidth = 54;
 const double _kColumnGap = 8;
+
+/// Scales a fixed column width by the current text scale so wider text still
+/// fits its column.
+double _w(BuildContext context, double width) =>
+    MediaQuery.textScalerOf(context).scale(width);
 
 /// One row in the analysis table: a search line plus the position its moves
 /// apply to. [stale] lines were computed for a previous board position and are
@@ -55,6 +61,10 @@ class AnalysisPanel extends StatelessWidget {
 
   /// Position the [bestMove] applies to.
   final Position position;
+
+  /// True when [bestMove] was computed for a position the board has moved on
+  /// from; it is then greyed out like the stale lines.
+  final bool bestMoveStale;
   final DisplayLanguage language;
   final ScorePerspective scorePerspective;
 
@@ -63,6 +73,7 @@ class AnalysisPanel extends StatelessWidget {
     this.lines = const [],
     this.bestMove,
     required this.position,
+    this.bestMoveStale = false,
     this.language = DisplayLanguage.simplified,
     this.scorePerspective = ScorePerspective.red,
   });
@@ -79,38 +90,59 @@ class AnalysisPanel extends StatelessWidget {
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (bestMove != null) ...[
-            Text(
-              'Best: ${MoveNotation.toNotation(bestMove!.move, position, language)}'
-              '${bestMove!.ponder != null ? '  Ponder: ${MoveNotation.toNotation(bestMove!.ponder!, MoveNotation.applyUciMove(position, bestMove!.move), language)}' : ''}',
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: Colors.green,
-              ),
+    // The table scrolls; the best move and the search stats stay pinned to the
+    // bottom of the panel so they are always visible.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (lines.isNotEmpty) ...[
+                  const _HeaderRow(),
+                  const Divider(height: 8),
+                  for (final line in lines)
+                    _LineRow(
+                      line: line,
+                      language: language,
+                      scorePerspective: scorePerspective,
+                    ),
+                ],
+              ],
             ),
-            const SizedBox(height: 6),
-          ],
-          if (lines.isNotEmpty) ...[
-            _statsRow(context),
-            const SizedBox(height: 4),
-            const _HeaderRow(),
-            const Divider(height: 8),
-            for (final line in lines)
-              _LineRow(
-                line: line,
-                language: language,
-                scorePerspective: scorePerspective,
-              ),
-          ],
-        ],
-      ),
+          ),
+        ),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (bestMove != null) ...[
+                Opacity(
+                  opacity: bestMoveStale ? 0.4 : 1,
+                  child: Text(
+                    'Best: ${MoveNotation.toNotation(bestMove!.move, position, language)}'
+                    '${bestMove!.ponder != null ? '  Ponder: ${MoveNotation.toNotation(bestMove!.ponder!, MoveNotation.applyUciMove(position, bestMove!.move), language)}' : ''}',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green,
+                    ),
+                  ),
+                ),
+                if (lines.isNotEmpty) const SizedBox(height: 4),
+              ],
+              if (lines.isNotEmpty) _statsRow(context),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -177,10 +209,10 @@ class _HeaderRow extends StatelessWidget {
       color: Colors.grey,
     );
     return Row(
-      children: const [
+      children: [
         SizedBox(
-          width: _kDepthWidth,
-          child: Text(
+          width: _w(context, _kDepthWidth),
+          child: const Text(
             'Depth',
             style: style,
             textAlign: TextAlign.right,
@@ -189,18 +221,18 @@ class _HeaderRow extends StatelessWidget {
             overflow: TextOverflow.clip,
           ),
         ),
-        SizedBox(width: _kColumnGap),
+        const SizedBox(width: _kColumnGap),
         SizedBox(
-          width: _kScoreWidth,
-          child: Text('Score', style: style),
+          width: _w(context, _kScoreWidth),
+          child: const Text('Score', style: style),
         ),
-        SizedBox(width: _kColumnGap),
+        const SizedBox(width: _kColumnGap),
         SizedBox(
-          width: _kTimeWidth,
-          child: Text('Time', style: style),
+          width: _w(context, _kTimeWidth),
+          child: const Text('Time', style: style),
         ),
-        SizedBox(width: _kColumnGap),
-        Expanded(child: Text('Line', style: style)),
+        const SizedBox(width: _kColumnGap),
+        const Expanded(child: Text('Line', style: style)),
       ],
     );
   }
@@ -240,7 +272,7 @@ class _LineRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: _kDepthWidth,
+            width: _w(context, _kDepthWidth),
             child: Text(
               '${info.depth}',
               textAlign: TextAlign.right,
@@ -249,7 +281,7 @@ class _LineRow extends StatelessWidget {
           ),
           const SizedBox(width: _kColumnGap),
           SizedBox(
-            width: _kScoreWidth,
+            width: _w(context, _kScoreWidth),
             child: Text(
               '$bound${score.text}',
               style: TextStyle(
@@ -262,7 +294,7 @@ class _LineRow extends StatelessWidget {
           ),
           const SizedBox(width: _kColumnGap),
           SizedBox(
-            width: _kTimeWidth,
+            width: _w(context, _kTimeWidth),
             child: Text(
               info.timeText,
               style: const TextStyle(fontSize: 13, color: Colors.grey),

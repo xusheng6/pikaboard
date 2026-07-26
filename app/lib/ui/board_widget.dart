@@ -10,6 +10,10 @@ class BoardWidget extends StatelessWidget {
   final int? highlightTo;
   final int? lastMoveFrom;
   final int? lastMoveTo;
+
+  /// Squares of the opponent's best reply (the ponder move), shown in blue.
+  final int? ponderFrom;
+  final int? ponderTo;
   final ValueChanged<int>? onSquareTap;
   final DisplayLanguage language;
 
@@ -21,6 +25,8 @@ class BoardWidget extends StatelessWidget {
     this.highlightTo,
     this.lastMoveFrom,
     this.lastMoveTo,
+    this.ponderFrom,
+    this.ponderTo,
     this.onSquareTap,
     this.language = DisplayLanguage.simplified,
   });
@@ -68,6 +74,8 @@ class BoardWidget extends StatelessWidget {
     final isHighlightTo = highlightTo == square;
     final isLastFrom = lastMoveFrom == square;
     final isLastTo = lastMoveTo == square;
+    final isPonderFrom = ponderFrom == square;
+    final isPonderTo = ponderTo == square;
 
     return Positioned(
       left: file * cellW,
@@ -89,6 +97,20 @@ class BoardWidget extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: Colors.amber.withValues(alpha: 0.3),
+                  ),
+                ),
+              // Opponent's best reply (drawn first so the best move wins when
+              // both land on the same square, e.g. a recapture)
+              if (isPonderFrom || isPonderTo)
+                Container(
+                  width: pieceSize + 6,
+                  height: pieceSize + 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isPonderFrom
+                        ? Colors.blue.withValues(alpha: 0.25)
+                        : Colors.blue.withValues(alpha: 0.35),
+                    border: Border.all(color: Colors.blue.shade700, width: 2.5),
                   ),
                 ),
               // Best move highlight (behind piece)
@@ -125,7 +147,7 @@ class BoardWidget extends StatelessWidget {
                     border: Border.all(color: Colors.orange.shade600, width: 3),
                   ),
                 ),
-              // Empty square highlight for best move destination
+              // Empty square markers for the move destinations
               if (isHighlightTo && piece == null)
                 Container(
                   width: pieceSize * 0.4,
@@ -133,6 +155,15 @@ class BoardWidget extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: Colors.green.shade600,
+                  ),
+                )
+              else if (isPonderTo && piece == null)
+                Container(
+                  width: pieceSize * 0.4,
+                  height: pieceSize * 0.4,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.blue.shade600,
                   ),
                 ),
             ],
