@@ -241,6 +241,7 @@
 				33CC110E2044A8840003C045 /* Bundle Framework */,
 				3399D490228B24CF009A79C7 /* ShellScript */,
 				AAAA000000000000000000E1 /* Bundle Pikafish Engine */,
+				AE975F92070DBA18854F2B91 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -377,6 +378,23 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "set -e\nRES=\"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources\"\nmkdir -p \"$RES\"\ncp -f \"${SRCROOT}/engine/pikafish\" \"$RES/pikafish\"\nchmod +x \"$RES/pikafish\"\n# Copy the NNUE only when missing or changed (it is large).\nif [ ! -f \"$RES/pikafish.nnue\" ] || [ \"${SRCROOT}/../assets/pikafish.nnue\" -nt \"$RES/pikafish.nnue\" ]; then\n  cp -f \"${SRCROOT}/../assets/pikafish.nnue\" \"$RES/pikafish.nnue\"\nfi\n# Sign the bundled engine so it is allowed to run (ad-hoc for local builds).\ncodesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY:--}\" \"$RES/pikafish\"\n";
+		};
+		AE975F92070DBA18854F2B91 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
 		};
 		BE390721050DA2BFC1CE374A /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;

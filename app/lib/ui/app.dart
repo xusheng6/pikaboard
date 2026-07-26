@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../formats/game_io.dart';
 import '../engine/pikafish_engine.dart';
 import '../engine/search_info.dart';
 import '../models/game.dart';
@@ -122,6 +124,10 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
   // View-only board rotation; leaves the position untouched.
   bool _viewFromBlack = false;
+
+  // Where the game was loaded from or last saved to, when that is a file we
+  // can write back to.
+  String? _currentFilePath;
 
   BestMove? _latestBestMove;
 
@@ -290,7 +296,19 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   void initState() {
     super.initState();
     _loadGame(Game.fromPosition(Position.startPosition()));
+    _initFilePicker();
     _initEngine();
+  }
+
+  /// The macOS build runs unsandboxed (it spawns the engine), so the picker's
+  /// entitlement check has to be waived or it refuses to open.
+  Future<void> _initFilePicker() async {
+    if (!Platform.isMacOS) return;
+    try {
+      await FilePicker.skipEntitlementsChecks();
+    } catch (_) {
+      // Older plugin versions do not need this; carry on.
+    }
   }
 
   Future<void> _initEngine() async {
@@ -684,6 +702,64 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     // _isAnalyzing will be set to false when bestmove callback fires
   }
 
+  /// Open a game file: XQStudio's .XQF or one of ours.
+  Future<void> _openGameFile() async {
+    final picked = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: GameIO.readableExtensions,
+      dialogTitle: 'Open game',
+    );
+    final path = picked?.files.single.path;
+    if (path == null) return;
+
+    try {
+      final game = await GameIO.load(path);
+      if (!mounted) return;
+      if (_isAnalyzing) _stopAnalysis();
+      setState(() {
+        _loadGame(game);
+        _currentFilePath =
+            path.toLowerCase().endsWith('.${GameIO.nativeExtension}')
+            ? path
+            : null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not open: $e')));
+    }
+  }
+
+  /// Save the game — including every variation and note — as JSON.
+  Future<void> _saveGameFile() async {
+    var path = _currentFilePath;
+    if (path == null) {
+      path = await FilePicker.saveFile(
+        dialogTitle: 'Save game',
+        fileName: GameIO.suggestedFileName(_game),
+        type: FileType.custom,
+        allowedExtensions: const [GameIO.nativeExtension],
+      );
+      if (path == null) return;
+      if (!path.contains('.')) path = '$path.${GameIO.nativeExtension}';
+    }
+
+    try {
+      await GameIO.save(path, _game);
+      if (!mounted) return;
+      setState(() => _currentFilePath = path);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Saved ${path.split('/').last}')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+    }
+  }
+
   void _openSettings() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -981,6 +1057,18 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         onPressed: _isAnalyzing ? null : _resetPosition,
                         icon: const Icon(Icons.restart_alt, size: 18),
                         label: const Text('New'),
+                      ),
+                      IconButton(
+                        onPressed: _openGameFile,
+                        icon: const Icon(Icons.folder_open, size: 18),
+                        tooltip: 'Open game (.XQF or .pbg)',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      IconButton(
+                        onPressed: _saveGameFile,
+                        icon: const Icon(Icons.save_outlined, size: 18),
+                        tooltip: 'Save game',
+                        visualDensity: VisualDensity.compact,
                       ),
                       TextButton.icon(
                         onPressed: _isAnalyzing ? null : _clearBoard,
