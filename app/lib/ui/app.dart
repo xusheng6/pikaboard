@@ -134,6 +134,14 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   // True while a file is being dragged over the window.
   bool _dragging = false;
 
+  // Whole-game analysis: how far it has got, and how to stop it.
+  int? _batchDone;
+  int? _batchTotal;
+  bool _batchCancelled = false;
+
+  /// Seconds the engine gets per position; remembered between runs.
+  int _secondsPerMove = 3;
+
   BestMove? _latestBestMove;
 
   // The position the engine is currently searching. Search output is tied to
@@ -700,6 +708,101 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _selectedSquare = null;
       _startEngineSearch(_position);
     });
+  }
+
+  /// Walk the current line, giving the engine a fixed slice of time on each
+  /// position so the score chart fills in.
+  ///
+  /// Each position is searched with the normal infinite search and stopped on
+  /// a timer, which works the same on both engine backends; scores land in the
+  /// usual per-position store, so a deeper manual search is never overwritten
+  /// by a shallow sweep.
+  Future<void> _analyseWholeGame() async {
+    if (!_engineReady || _batchTotal != null) return;
+    final seconds = await _askSecondsPerMove();
+    if (seconds == null || !mounted) return;
+
+    if (_isAnalyzing) _stopAnalysis();
+    final resumeAt = _current;
+    // The line the board is on, from the start through to its end.
+    final nodes = _current.mainlineEnd.pathFromRoot;
+
+    setState(() {
+      _secondsPerMove = seconds;
+      _batchCancelled = false;
+      _batchDone = 0;
+      _batchTotal = nodes.length;
+      _staleLines = [];
+      _curByDepth.clear();
+    });
+
+    try {
+      for (final node in nodes) {
+        if (_batchCancelled || !mounted) break;
+        setState(() {
+          _current = node;
+          _curByDepth.clear();
+          _enginePosition = node.position;
+          _updateLastMoveHighlight();
+        });
+
+        _engine.setPosition(node.position.toFen());
+        _engine.goInfinite();
+        await Future<void>.delayed(Duration(seconds: seconds));
+        _engine.stop();
+        // Let the search wind down so its last lines are attributed here.
+        await _engine.bestMove.first.timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => const BestMove(move: ''),
+        );
+
+        if (!mounted) break;
+        setState(() => _batchDone = (_batchDone ?? 0) + 1);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _batchDone = null;
+          _batchTotal = null;
+          _isAnalyzing = false;
+          _current = resumeAt;
+          _updateLastMoveHighlight();
+        });
+      }
+    }
+  }
+
+  void _cancelWholeGameAnalysis() {
+    setState(() => _batchCancelled = true);
+    _engine.stop();
+  }
+
+  /// Ask how long the engine gets on each position.
+  Future<int?> _askSecondsPerMove() {
+    return showDialog<int>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('Analyse whole game'),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+            child: Text(
+              'The engine searches each position in turn, then the chart shows '
+              'how the game swung.',
+              style: TextStyle(color: Theme.of(context).hintColor),
+            ),
+          ),
+          for (final seconds in const [1, 3, 5, 10, 30])
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialogContext, seconds),
+              child: Text(
+                '$seconds second${seconds == 1 ? '' : 's'} per move'
+                '${seconds == _secondsPerMove ? '  ·  last used' : ''}',
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   void _stopAnalysis() {
@@ -1358,6 +1461,12 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                                   plyLabels: _plyLabels,
                                   currentPly: _current.ply,
                                   onSelect: _goToPly,
+                                  onAnalyseGame: _engineReady
+                                      ? _analyseWholeGame
+                                      : null,
+                                  onCancelAnalysis: _cancelWholeGameAnalysis,
+                                  analysedCount: _batchDone,
+                                  analysisTotal: _batchTotal,
                                 ),
                               ],
                             ),

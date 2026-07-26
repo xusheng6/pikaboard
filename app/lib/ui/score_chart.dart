@@ -45,13 +45,29 @@ class ScoreChart extends StatefulWidget {
   /// Called with the ply to jump to when the chart is tapped.
   final ValueChanged<int>? onSelect;
 
+  /// Start analysing the whole line, filling the chart in.
+  final VoidCallback? onAnalyseGame;
+
+  /// Stop an analysis that is running.
+  final VoidCallback? onCancelAnalysis;
+
+  /// Plies analysed so far out of the total, while a run is in progress.
+  final int? analysedCount;
+  final int? analysisTotal;
+
   const ScoreChart({
     super.key,
     required this.centipawns,
     required this.currentPly,
     this.plyLabels = const [],
     this.onSelect,
+    this.onAnalyseGame,
+    this.onCancelAnalysis,
+    this.analysedCount,
+    this.analysisTotal,
   });
+
+  bool get isAnalysing => analysedCount != null && analysisTotal != null;
 
   /// Scores are clamped to this magnitude so one decisive position does not
   /// flatten the rest of the game.
@@ -83,16 +99,6 @@ class _ScoreChartState extends State<ScoreChart> {
     final theme = Theme.of(context);
     final centipawns = widget.centipawns;
     final known = centipawns.where((c) => c != null).length;
-    if (known == 0) {
-      return Padding(
-        padding: const EdgeInsets.all(16),
-        child: Text(
-          'No evaluations yet. Analyse a position and its score is plotted '
-          'here; step through the game to fill the graph in.',
-          style: TextStyle(color: theme.hintColor),
-        ),
-      );
-    }
 
     final current = centipawns.isEmpty
         ? null
@@ -102,7 +108,7 @@ class _ScoreChartState extends State<ScoreChart> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          padding: const EdgeInsets.fromLTRB(12, 8, 6, 0),
           child: Row(
             children: [
               Text(
@@ -112,70 +118,108 @@ class _ScoreChartState extends State<ScoreChart> {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                '$known of ${centipawns.length} positions',
-                style: TextStyle(fontSize: 12, color: theme.hintColor),
-              ),
-              const Spacer(),
-              Text(
-                current == null
-                    ? 'ply ${widget.currentPly}'
-                    : scoreLabel(current),
-                style: TextStyle(
-                  fontSize: 13,
-                  fontFamily: 'monospace',
-                  fontWeight: FontWeight.bold,
-                  color: current == null
-                      ? theme.hintColor
-                      : (current >= 0
-                            ? Colors.red.shade600
-                            : theme.colorScheme.onSurface),
+              Flexible(
+                child: Text(
+                  widget.isAnalysing
+                      ? 'analysing ${widget.analysedCount} of ${widget.analysisTotal}'
+                      : '$known of ${centipawns.length} positions',
+                  style: TextStyle(fontSize: 12, color: theme.hintColor),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const Spacer(),
+              if (current != null || !widget.isAnalysing)
+                Text(
+                  current == null
+                      ? 'ply ${widget.currentPly}'
+                      : scoreLabel(current),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontFamily: 'monospace',
+                    fontWeight: FontWeight.bold,
+                    color: current == null
+                        ? theme.hintColor
+                        : (current >= 0
+                              ? Colors.red.shade600
+                              : theme.colorScheme.onSurface),
+                  ),
+                ),
+              if (widget.isAnalysing && widget.onCancelAnalysis != null)
+                IconButton(
+                  onPressed: widget.onCancelAnalysis,
+                  icon: const Icon(Icons.stop_circle_outlined, size: 20),
+                  tooltip: 'Stop analysing',
+                  visualDensity: VisualDensity.compact,
+                )
+              else if (widget.onAnalyseGame != null)
+                IconButton(
+                  onPressed: widget.onAnalyseGame,
+                  icon: const Icon(Icons.auto_graph, size: 20),
+                  tooltip: 'Analyse the whole game',
+                  visualDensity: VisualDensity.compact,
+                ),
             ],
           ),
         ),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final size = Size(constraints.maxWidth, constraints.maxHeight);
-              return MouseRegion(
-                onHover: (event) => _setHover(event.localPosition, size),
-                onExit: (_) => setState(() => _hoverPly = null),
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapDown: widget.onSelect == null
-                      ? null
-                      : (details) => widget.onSelect!(
-                          plyAt(details.localPosition.dx, size.width),
-                        ),
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: CustomPaint(
-                          painter: _ScorePainter(
-                            centipawns: centipawns,
-                            currentPly: widget.currentPly,
-                            hoverPly: _hoverPly,
-                            lineColor: theme.colorScheme.onSurface,
-                            zeroLineColor: theme.colorScheme.onSurface
-                                .withValues(alpha: 0.55),
-                            gridColor: theme.dividerColor,
-                            labelColor: theme.hintColor,
-                            negativeFill: theme.colorScheme.onSurface
-                                .withValues(alpha: 0.18),
+        if (widget.isAnalysing && widget.analysisTotal! > 0)
+          LinearProgressIndicator(
+            value: widget.analysedCount! / widget.analysisTotal!,
+            minHeight: 2,
+          ),
+        if (known == 0)
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'No evaluations yet. Analyse the whole game with the button '
+                'above, or analyse positions as you step through — every '
+                'score lands here.',
+                style: TextStyle(color: theme.hintColor),
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final size = Size(constraints.maxWidth, constraints.maxHeight);
+                return MouseRegion(
+                  onHover: (event) => _setHover(event.localPosition, size),
+                  onExit: (_) => setState(() => _hoverPly = null),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapDown: widget.onSelect == null
+                        ? null
+                        : (details) => widget.onSelect!(
+                            plyAt(details.localPosition.dx, size.width),
+                          ),
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: CustomPaint(
+                            painter: _ScorePainter(
+                              centipawns: centipawns,
+                              currentPly: widget.currentPly,
+                              hoverPly: _hoverPly,
+                              lineColor: theme.colorScheme.onSurface,
+                              zeroLineColor: theme.colorScheme.onSurface
+                                  .withValues(alpha: 0.55),
+                              gridColor: theme.dividerColor,
+                              labelColor: theme.hintColor,
+                              negativeFill: theme.colorScheme.onSurface
+                                  .withValues(alpha: 0.18),
+                            ),
                           ),
                         ),
-                      ),
-                      if (_hoverPly != null && centipawns[_hoverPly!] != null)
-                        _hoverCard(context, size, _hoverPly!),
-                    ],
+                        if (_hoverPly != null && centipawns[_hoverPly!] != null)
+                          _hoverCard(context, size, _hoverPly!),
+                      ],
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
-        ),
       ],
     );
   }

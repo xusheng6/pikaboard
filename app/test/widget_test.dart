@@ -710,6 +710,52 @@ void main() {
       expect(find.text('1. 炮二平五'), findsNothing);
     });
 
+    testWidgets('offers whole-game analysis and reports its progress', (
+      tester,
+    ) async {
+      var started = 0, cancelled = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ScoreChart(
+              centipawns: const [null, null, null],
+              currentPly: 0,
+              onAnalyseGame: () => started++,
+              onCancelAnalysis: () => cancelled++,
+            ),
+          ),
+        ),
+      );
+
+      // With nothing analysed the prompt points at the button, which is there.
+      expect(find.textContaining('No evaluations yet'), findsOneWidget);
+      expect(find.byTooltip('Analyse the whole game'), findsOneWidget);
+      await tester.tap(find.byTooltip('Analyse the whole game'));
+      expect(started, 1);
+
+      // While running it shows progress and offers to stop instead.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ScoreChart(
+              centipawns: const [12, null, null],
+              currentPly: 0,
+              onAnalyseGame: () => started++,
+              onCancelAnalysis: () => cancelled++,
+              analysedCount: 1,
+              analysisTotal: 3,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('analysing 1 of 3'), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      expect(find.byTooltip('Analyse the whole game'), findsNothing);
+      await tester.tap(find.byTooltip('Stop analysing'));
+      expect(cancelled, 1);
+    });
+
     testWidgets('tapping the chart jumps to that ply', (tester) async {
       var selected = -1;
       await tester.pumpWidget(
