@@ -173,6 +173,26 @@ class MoveNotation {
     return result;
   }
 
+  /// The UCI move that turns [before] into [after], reconstructed by finding
+  /// the square a piece left and the one it arrived at, or null if the two
+  /// positions do not differ by a single move.
+  static String? uciBetween(Position before, Position after) {
+    int? from;
+    int? to;
+    for (var sq = 0; sq < Position.squareCount; sq++) {
+      final b = before.pieceAt(sq);
+      final a = after.pieceAt(sq);
+      if (b == a) continue;
+      if (b != null && a == null) {
+        from = sq; // piece left this square
+      } else if (a != null) {
+        to = sq; // piece arrived (move or capture)
+      }
+    }
+    if (from == null || to == null) return null;
+    return '${Position.squareToUci(from)}${Position.squareToUci(to)}';
+  }
+
   /// Apply a UCI move to a position, returning the new position.
   static Position applyUciMove(Position pos, String uci) {
     if (uci.length < 4) return pos;

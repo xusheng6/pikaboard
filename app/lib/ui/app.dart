@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../engine/pikafish_engine.dart';
 import '../engine/search_info.dart';
+import '../models/move_notation.dart';
 import '../models/move_rules.dart';
 import '../models/piece.dart';
 import '../models/position.dart';
@@ -140,6 +141,22 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   List<int?> get _scoreByPly => [
     for (final position in _history) _evalByFen[position.toFen()]?.cp,
   ];
+
+  /// Name for each ply, e.g. "3. 炮二平五" — used by the chart's hover readout.
+  List<String> get _plyLabels {
+    final labels = <String>['Start'];
+    for (var i = 1; i < _history.length; i++) {
+      final before = _history[i - 1];
+      final uci = MoveNotation.uciBetween(before, _history[i]);
+      final notation = uci == null
+          ? '??'
+          : MoveNotation.toNotation(uci, before, widget.settings.language);
+      final moveNumber = (i - 1) ~/ 2 + 1;
+      final isRedPly = (i - 1) % 2 == 0;
+      labels.add('$moveNumber${isRedPly ? '.' : '...'} $notation');
+    }
+    return labels;
+  }
 
   /// Rows for the analysis table: current-position lines (deepest on top)
   /// first, then any stale previous-position lines.
@@ -1097,6 +1114,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                               EngineOutputView(log: _engineLog),
                               ScoreChart(
                                 centipawns: _scoreByPly,
+                                plyLabels: _plyLabels,
                                 currentPly: _historyIndex,
                                 onSelect: _goToIndex,
                               ),

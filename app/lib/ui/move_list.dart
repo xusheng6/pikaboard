@@ -39,7 +39,7 @@ class MoveList extends StatelessWidget {
     final chips = <Widget>[];
     for (int i = 1; i < history.length; i++) {
       final before = history[i - 1];
-      final uci = _moveUci(before, history[i]);
+      final uci = MoveNotation.uciBetween(before, history[i]);
       final notation = uci == null
           ? '??'
           : MoveNotation.toNotation(uci, before, language);
@@ -79,24 +79,5 @@ class MoveList extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Wrap(spacing: 4, runSpacing: 2, children: chips),
     );
-  }
-
-  /// Reconstruct the UCI move between two consecutive positions by finding the
-  /// square a piece left and the square it arrived at.
-  static String? _moveUci(Position before, Position after) {
-    int? from;
-    int? to;
-    for (int sq = 0; sq < Position.squareCount; sq++) {
-      final b = before.pieceAt(sq);
-      final a = after.pieceAt(sq);
-      if (b == a) continue;
-      if (b != null && a == null) {
-        from = sq; // piece left this square
-      } else if (a != null) {
-        to = sq; // piece arrived (move or capture)
-      }
-    }
-    if (from == null || to == null) return null;
-    return '${Position.squareToUci(from)}${Position.squareToUci(to)}';
   }
 }

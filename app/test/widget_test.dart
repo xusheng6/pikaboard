@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -651,6 +652,59 @@ void main() {
       expect(find.text('3 of 4 positions'), findsOneWidget);
       // The score at the current ply is called out.
       expect(find.text('-140'), findsOneWidget);
+    });
+
+    testWidgets('labels the score axis', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: ScoreChart(centipawns: [20, -300], currentPly: 0),
+          ),
+        ),
+      );
+      // Axis labels are painted, so assert the values the chart advertises.
+      expect(ScoreChart.gridValues, contains(0));
+      expect(ScoreChart.gridValues, containsAll([1000.0, 500.0, -500.0]));
+      // The gutter must be wide enough to hold "+1000".
+      expect(ScoreChart.padding.left, greaterThan(30));
+    });
+
+    testWidgets('hovering a point names the move and its exact score', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: ScoreChart(
+              centipawns: [10, -25, 340],
+              plyLabels: ['Start', '1. 炮二平五', '1... 马8进7'],
+              currentPly: 0,
+            ),
+          ),
+        ),
+      );
+
+      final chart = find.byType(CustomPaint).last;
+      final rect = tester.getRect(chart);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+
+      await mouse.moveTo(Offset(rect.right - 16, rect.center.dy));
+      await tester.pump();
+      expect(find.text('1... 马8进7'), findsOneWidget);
+      expect(find.text('+340'), findsWidgets);
+
+      // Moving to another point swaps the readout ...
+      await mouse.moveTo(Offset(rect.center.dx, rect.center.dy));
+      await tester.pump();
+      expect(find.text('1. 炮二平五'), findsOneWidget);
+      expect(find.text('-25'), findsWidgets);
+
+      // ... and leaving the chart dismisses it.
+      await mouse.moveTo(const Offset(-50, -50));
+      await tester.pump();
+      expect(find.text('1. 炮二平五'), findsNothing);
     });
 
     testWidgets('tapping the chart jumps to that ply', (tester) async {
