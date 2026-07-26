@@ -667,6 +667,27 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     }
   }
 
+  /// Replace the board with a transformed copy of the current position.
+  ///
+  /// The transformed position is a new starting point, so the move history is
+  /// dropped and stale engine output cleared; a running search restarts on it.
+  void _transformPosition(Position Function(Position) transform) {
+    setState(() {
+      final next = transform(_position);
+      _history = [next];
+      _historyIndex = 0;
+      _fenController.text = next.toFen();
+      _selectedSquare = null;
+      _latestBestMove = null;
+      _curByDepth.clear();
+      _staleLines = [];
+      _enginePosition = null;
+      _lastMoveFrom = null;
+      _lastMoveTo = null;
+      _restartAnalysisIfNeeded();
+    });
+  }
+
   void _toggleSideToMove() {
     setState(() {
       _replaceCurrentPosition(
@@ -851,7 +872,23 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                           label: const Text('Play Best'),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 4),
+                      // Board transforms, next to the side-to-move indicator
+                      // they share a row with.
+                      IconButton(
+                        onPressed: () =>
+                            _transformPosition((p) => p.mirrored()),
+                        icon: const Icon(Icons.swap_horiz, size: 20),
+                        tooltip: 'Mirror left-right (a↔i)',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      IconButton(
+                        onPressed: () => _transformPosition((p) => p.flipped()),
+                        icon: const Icon(Icons.swap_vert, size: 20),
+                        tooltip: 'Flip up-down and swap sides',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const SizedBox(width: 4),
                       // Side to move indicator / toggle
                       GestureDetector(
                         onTap: _isAnalyzing ? null : _toggleSideToMove,

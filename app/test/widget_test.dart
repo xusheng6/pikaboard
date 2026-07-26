@@ -284,6 +284,73 @@ void main() {
     });
   });
 
+  group('Board transforms', () {
+    test('mirroring swaps files and leaves the side to move alone', () {
+      // The opening position is symmetric, so mirroring is a no-op for it.
+      final start = Position.startPosition();
+      expect(start.mirrored().toFen(), start.toFen());
+
+      // After a one-sided cannon move the mirror image differs.
+      final afterMove = MoveNotation.applyUciMove(start, 'h2e2');
+      final mirrored = afterMove.mirrored();
+      expect(mirrored.toFen(), isNot(afterMove.toFen()));
+      expect(mirrored.sideToMove, afterMove.sideToMove);
+      // The cannon that stood on b2 is now on h2 and vice versa.
+      expect(
+        mirrored.pieceAt(Position.uciToSquare('h2')!),
+        const Piece(PieceColor.red, PieceType.cannon),
+      );
+      expect(mirrored.pieceAt(Position.uciToSquare('b2')!), isNull);
+      // Mirroring twice is the identity.
+      expect(mirrored.mirrored().toFen(), afterMove.toFen());
+    });
+
+    test('flipping hands the position to the other side', () {
+      final start = Position.startPosition();
+      final flipped = start.flipped();
+      // The armies swap colours, so the board looks the same but black moves.
+      expect(flipped.toFen(), '${Position.startFen.split(' ').first} b');
+      expect(flipped.sideToMove, PieceColor.black);
+
+      // A red king on e0 becomes a black king on e9 — still inside a palace.
+      final lone = Position.empty().withPiece(
+        Position.uciToSquare('e0')!,
+        const Piece(PieceColor.red, PieceType.king),
+      );
+      final loneFlipped = lone.flipped();
+      expect(
+        loneFlipped.pieceAt(Position.uciToSquare('e9')!),
+        const Piece(PieceColor.black, PieceType.king),
+      );
+      expect(loneFlipped.pieceAt(Position.uciToSquare('e0')!), isNull);
+      // Flipping twice is the identity.
+      expect(lone.flipped().flipped().toFen(), lone.toFen());
+    });
+
+    test('transformed positions stay legal for the engine', () {
+      final start = Position.startPosition();
+      final afterMove = MoveNotation.applyUciMove(start, 'h2e2');
+      // Black's knight move is legal in the mirror image too (mirrored file).
+      expect(
+        MoveRules.isLegal(
+          afterMove.mirrored(),
+          Position.uciToSquare('h9')!,
+          Position.uciToSquare('g7')!,
+        ),
+        isTrue,
+      );
+      // After a flip the same army, now black, still has its opening moves.
+      expect(
+        MoveRules.isLegal(
+          start.flipped(),
+          Position.uciToSquare('b9')!,
+          Position.uciToSquare('c7')!,
+        ),
+        isTrue,
+      );
+    });
+  });
+
   group('Move rules', () {
     /// Builds a position from a sparse map of UCI square -> FEN piece char.
     Position board(

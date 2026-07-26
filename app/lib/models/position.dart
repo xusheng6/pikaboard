@@ -109,6 +109,49 @@ class Position {
     return Position(squares: List<Piece?>.of(squares), sideToMove: color);
   }
 
+  /// This position mirrored across the centre file (a↔i).
+  ///
+  /// Both armies keep their pieces and colours and the side to move is
+  /// unchanged — the palace is symmetric, so the mirror image is an equally
+  /// legal and strategically identical position.
+  Position mirrored() {
+    final next = List<Piece?>.filled(squareCount, null);
+    for (var rank = 0; rank < ranks; rank++) {
+      for (var file = 0; file < files; file++) {
+        next[rank * files + (files - 1 - file)] = squares[rank * files + file];
+      }
+    }
+    return Position(squares: next, sideToMove: sideToMove);
+  }
+
+  /// This position handed to the other side: ranks are flipped and every piece
+  /// changes colour, so the side to move flips with them.
+  ///
+  /// The colour swap is what keeps the result legal — flipping ranks alone
+  /// would leave each king outside its own palace.
+  Position flipped() {
+    final next = List<Piece?>.filled(squareCount, null);
+    for (var rank = 0; rank < ranks; rank++) {
+      for (var file = 0; file < files; file++) {
+        final piece = squares[rank * files + file];
+        next[(ranks - 1 - rank) * files + file] = piece == null
+            ? null
+            : Piece(
+                piece.color == PieceColor.red
+                    ? PieceColor.black
+                    : PieceColor.red,
+                piece.type,
+              );
+      }
+    }
+    return Position(
+      squares: next,
+      sideToMove: sideToMove == PieceColor.red
+          ? PieceColor.black
+          : PieceColor.red,
+    );
+  }
+
   /// Convert square index to UCI notation (e.g., 0 -> "a0", 9 -> "a1").
   static String squareToUci(int square) {
     final file = square % files;
