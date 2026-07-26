@@ -16,7 +16,9 @@ import 'package:app/ui/board_widget.dart';
 import 'package:app/ui/hover_preview.dart';
 import 'package:app/ui/engine_output.dart';
 import 'package:app/models/game.dart';
+import 'package:app/ui/move_table.dart';
 import 'package:app/ui/move_tree.dart';
+import 'package:app/ui/variation_list.dart';
 import 'package:app/ui/score_chart.dart';
 
 SearchInfo _line(int depth, {int scoreCp = 0, required String pv}) {
@@ -1200,6 +1202,117 @@ void main() {
         restored.root.mainlineEnd.position.toFen(),
         game.root.mainlineEnd.position.toFen(),
       );
+    });
+  });
+
+  group('MoveTable', () {
+    Game sampleGame() => Game.fromMoves(Position.startPosition(), [
+      'h2e2',
+      'h9g7',
+      'b0c2',
+      'b9c7',
+      'h0g2',
+    ]);
+
+    testWidgets('pairs Red and Black on one numbered line', (tester) async {
+      final game = sampleGame();
+      final line = game.root.mainlineEnd.pathFromRoot;
+      GameNode? selected;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MoveTable(
+              line: line,
+              current: line[3],
+              onSelect: (node) => selected = node,
+              showPreview: false,
+            ),
+          ),
+        ),
+      );
+
+      // Three numbered rows for five moves.
+      expect(find.text('1.'), findsOneWidget);
+      expect(find.text('2.'), findsOneWidget);
+      expect(find.text('3.'), findsOneWidget);
+      expect(find.text('4.'), findsNothing);
+      expect(find.text('3/5'), findsOneWidget); // third move of five
+
+      // Red and Black of move 1 sit on the same row, Red on the left.
+      final red = tester.getCenter(find.text('炮二平五'));
+      final black = tester.getCenter(find.text('马8进7'));
+      expect(red.dy, black.dy);
+      expect(red.dx, lessThan(black.dx));
+
+      await tester.tap(find.text('马8进7'));
+      expect(selected, line[2]);
+    });
+
+    testWidgets('flags moves that carry a note or a branch', (tester) async {
+      final game = sampleGame();
+      game.root.children.first.comment = 'central cannon';
+      game.root.addMove('b0c2'); // an alternative first move
+      final line = game.root.mainlineEnd.pathFromRoot;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MoveTable(
+              line: line,
+              current: game.root,
+              onSelect: (_) {},
+              showPreview: false,
+            ),
+          ),
+        ),
+      );
+      expect(find.byIcon(Icons.chat_bubble), findsOneWidget);
+      expect(find.byIcon(Icons.call_split), findsOneWidget);
+    });
+  });
+
+  group('VariationList', () {
+    testWidgets('lists continuations and alternatives, and switches lines', (
+      tester,
+    ) async {
+      final game = Game.fromMoves(Position.startPosition(), ['h2e2', 'h9g7']);
+      final first = game.root.children.first;
+      final alternative = game.root.addMove('b0c2');
+      first.addMove('b0c2'); // a second continuation after 1. 炮二平五
+      GameNode? selected;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VariationList(
+              current: first,
+              onSelect: (node) => selected = node,
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Continues with'), findsOneWidget);
+      expect(find.text('Instead of this move'), findsOneWidget);
+      // Both continuations and the alternative first move are offered.
+      expect(find.textContaining('1... 马8进7'), findsOneWidget);
+      expect(find.textContaining('1. 马八进七'), findsOneWidget);
+
+      await tester.tap(find.textContaining('1. 马八进七'));
+      expect(selected, alternative);
+    });
+
+    testWidgets('says so when there is nothing to branch to', (tester) async {
+      final game = Game.fromPosition(Position.startPosition());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VariationList(current: game.root, onSelect: (_) {}),
+          ),
+        ),
+      );
+      expect(find.textContaining('No branches here'), findsOneWidget);
     });
   });
 

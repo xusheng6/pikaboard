@@ -18,10 +18,12 @@ import 'board_widget.dart';
 import 'analysis_panel.dart';
 import 'candidate_moves.dart';
 import 'engine_output.dart';
+import 'move_table.dart';
 import 'move_tree.dart';
 import 'notes_panel.dart';
 import 'score_chart.dart';
 import 'settings_page.dart';
+import 'variation_list.dart';
 
 class PikaboardApp extends StatefulWidget {
   const PikaboardApp({super.key});
@@ -1153,7 +1155,11 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                     160.0,
                     isDesktop ? 760.0 : 620.0,
                   );
-              return Column(
+              // Wide windows get XQStudio's shape: board on the left, the
+              // game score beside it, notes and branches to the right.
+              final wide = constraints.maxWidth >= 980;
+
+              final boardColumn = Column(
                 children: [
                   // FEN input
                   Padding(
@@ -1428,8 +1434,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
                   const Divider(height: 1),
 
-                  // Move list (only once moves have been played)
-                  if (_game.root.children.isNotEmpty)
+                  // Move list, for narrow windows where there is no column
+                  // beside the board to hold it.
+                  if (!wide && _game.root.children.isNotEmpty)
                     ConstrainedBox(
                       constraints: BoxConstraints(
                         maxHeight: textScaler.scale(96),
@@ -1449,23 +1456,25 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         },
                       ),
                     ),
-                  if (_game.root.children.isNotEmpty) const Divider(height: 1),
+                  if (!wide && _game.root.children.isNotEmpty)
+                    const Divider(height: 1),
 
                   // Engine analysis and cloud candidates in separate tabs
                   Expanded(
                     child: DefaultTabController(
-                      length: 5,
+                      // Notes live in the right-hand column when there is one.
+                      length: wide ? 4 : 5,
                       child: Column(
                         children: [
-                          const TabBar(
+                          TabBar(
                             isScrollable: true,
                             tabAlignment: TabAlignment.center,
                             tabs: [
-                              Tab(text: 'Engine'),
-                              Tab(text: 'Notes'),
-                              Tab(text: 'Cloud'),
-                              Tab(text: 'Raw'),
-                              Tab(text: 'Score'),
+                              const Tab(text: 'Engine'),
+                              if (!wide) const Tab(text: 'Notes'),
+                              const Tab(text: 'Cloud'),
+                              const Tab(text: 'Raw'),
+                              const Tab(text: 'Score'),
                             ],
                           ),
                           Expanded(
@@ -1492,12 +1501,13 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                                   showPreview: settings.previewOnEngineLine,
                                   viewFromBlack: _viewFromBlack,
                                 ),
-                                NotesPanel(
-                                  node: _current,
-                                  language: settings.language,
-                                  onChanged: (text) =>
-                                      setState(() => _current.comment = text),
-                                ),
+                                if (!wide)
+                                  NotesPanel(
+                                    node: _current,
+                                    language: settings.language,
+                                    onChanged: (text) =>
+                                        setState(() => _current.comment = text),
+                                  ),
                                 SingleChildScrollView(
                                   child: CandidateMoves(
                                     position: _position,
@@ -1547,6 +1557,59 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         ],
                       ),
                     ),
+                ],
+              );
+
+              if (!wide) return boardColumn;
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(child: boardColumn),
+                  const VerticalDivider(width: 1),
+                  SizedBox(
+                    width: textScaler.scale(196),
+                    child: MoveTable(
+                      line: _line,
+                      current: _current,
+                      language: settings.language,
+                      onSelect: _goToNode,
+                      showPreview: settings.previewOnMoveTree,
+                      viewFromBlack: _viewFromBlack,
+                      scoreLabelFor: (node) {
+                        final sample = _evalByFen[node.position.toFen()];
+                        return sample == null ? null : scoreLabel(sample.cp);
+                      },
+                    ),
+                  ),
+                  const VerticalDivider(width: 1),
+                  SizedBox(
+                    width: textScaler.scale(280),
+                    child: Column(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: NotesPanel(
+                            node: _current,
+                            language: settings.language,
+                            onChanged: (text) =>
+                                setState(() => _current.comment = text),
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        Expanded(
+                          flex: 2,
+                          child: VariationList(
+                            current: _current,
+                            language: settings.language,
+                            onSelect: _goToNode,
+                            onPromote: _promoteNode,
+                            onDelete: _deleteNode,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               );
             },
