@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../formats/game_export.dart';
@@ -129,6 +130,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   // Where the game was loaded from or last saved to, when that is a file we
   // can write back to.
   String? _currentFilePath;
+
+  // True while a file is being dragged over the window.
+  bool _dragging = false;
 
   BestMove? _latestBestMove;
 
@@ -711,14 +715,18 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       dialogTitle: 'Open game',
     );
     final path = picked?.files.single.path;
-    if (path == null) return;
+    if (path != null) await _openPath(path);
+  }
 
+  /// Load the game at [path], however it was chosen.
+  Future<void> _openPath(String path) async {
     try {
       final game = await GameIO.load(path, language: widget.settings.language);
       if (!mounted) return;
       if (_isAnalyzing) _stopAnalysis();
       setState(() {
         _loadGame(game);
+        // Only our own format can be written back to.
         _currentFilePath =
             path.toLowerCase().endsWith('.${GameIO.nativeExtension}')
             ? path
@@ -729,6 +737,28 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Could not open: $e')));
+    }
+  }
+
+  /// Files dropped on the window open the same way picked ones do; extras are
+  /// reported rather than silently replacing each other.
+  Future<void> _openDropped(List<DropItem> items) async {
+    setState(() => _dragging = false);
+    final paths = [
+      for (final item in items)
+        if (item.path.isNotEmpty) item.path,
+    ];
+    if (paths.isEmpty) return;
+    await _openPath(paths.first);
+    if (paths.length > 1 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Opened ${paths.first.split('/').last} — '
+            '${paths.length - 1} other file(s) ignored',
+          ),
+        ),
+      );
     }
   }
 
@@ -960,399 +990,460 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     final double maxBoardWidth = isDesktop ? 640 : 430;
 
     return Scaffold(
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            // Cap the board's height so it shrinks to fit short windows
-            // instead of overflowing; leave room for the control rows and a
-            // usable analysis panel below. The reserve follows the text scale
-            // since those rows grow with the font size. The ceiling matches
-            // maxBoardWidth's 9:10 aspect so height, not the ceiling, is what
-            // caps a big board.
-            final textScaler = MediaQuery.textScalerOf(context);
-            final double boardMaxHeight =
-                (constraints.maxHeight - textScaler.scale(340)).clamp(
-                  160.0,
-                  isDesktop ? 760.0 : 620.0,
-                );
-            return Column(
-              children: [
-                // FEN input
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _fenController,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontFamily: 'monospace',
-                          ),
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 8,
-                            ),
-                            border: OutlineInputBorder(),
-                            hintText: 'FEN',
-                          ),
-                          onSubmitted: (_) => _applyFen(),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.check, size: 20),
-                        onPressed: _applyFen,
-                        tooltip: 'Apply FEN',
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Board — constrained to maxBoardWidth
-                Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: maxBoardWidth,
-                      maxHeight: boardMaxHeight,
+      body: _withFileDrop(
+        SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Cap the board's height so it shrinks to fit short windows
+              // instead of overflowing; leave room for the control rows and a
+              // usable analysis panel below. The reserve follows the text scale
+              // since those rows grow with the font size. The ceiling matches
+              // maxBoardWidth's 9:10 aspect so height, not the ceiling, is what
+              // caps a big board.
+              final textScaler = MediaQuery.textScalerOf(context);
+              final double boardMaxHeight =
+                  (constraints.maxHeight - textScaler.scale(340)).clamp(
+                    160.0,
+                    isDesktop ? 760.0 : 620.0,
+                  );
+              return Column(
+                children: [
+                  // FEN input
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: BoardWidget(
-                        position: _position,
-                        selectedSquare: _selectedSquare,
-                        // Each indicator is independently switchable in
-                        // settings; when off it is simply not passed.
-                        lastMoveFrom: settings.highlightLastMove
-                            ? _lastMoveFrom
-                            : null,
-                        lastMoveTo: settings.highlightLastMove
-                            ? _lastMoveTo
-                            : null,
-                        arrows: _boardArrows,
-                        viewFromBlack: _viewFromBlack,
-                        onSquareTap: _onSquareTap,
-                        language: settings.language,
-                      ),
-                    ),
-                  ),
-                ),
-
-                // Move navigation
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        onPressed: _canGoBack ? _goToStart : null,
-                        icon: const Icon(Icons.skip_previous, size: 22),
-                        tooltip: 'Go to start',
-                      ),
-                      IconButton(
-                        onPressed: _canGoBack ? _goBack : null,
-                        icon: const Icon(Icons.chevron_left, size: 28),
-                        tooltip: 'Previous move',
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(
-                          '${_current.ply}/${_current.mainlineEnd.ply}',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: _canGoForward ? _goForward : null,
-                        icon: const Icon(Icons.chevron_right, size: 28),
-                        tooltip: 'Next move',
-                      ),
-                      IconButton(
-                        onPressed: _canGoForward ? _goToEnd : null,
-                        icon: const Icon(Icons.skip_next, size: 22),
-                        tooltip: 'Go to end',
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Controls
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  child: Row(
-                    children: [
-                      // Single button that starts or stops the search.
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: !_engineReady
-                              ? null
-                              : (_isAnalyzing ? _stopAnalysis : _startAnalysis),
-                          icon: Icon(
-                            _isAnalyzing ? Icons.stop : Icons.play_arrow,
-                            size: 18,
-                          ),
-                          label: Text(_isAnalyzing ? 'Stop' : 'Analyze'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _canPlayBestMove ? _playBestMove : null,
-                          icon: const Icon(Icons.done_all, size: 18),
-                          label: const Text('Play Best'),
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      // Board transforms, next to the side-to-move indicator
-                      // they share a row with.
-                      IconButton(
-                        onPressed: () =>
-                            _transformPosition((p) => p.mirrored()),
-                        icon: const Icon(Icons.swap_horiz, size: 20),
-                        tooltip: 'Mirror left-right (a↔i)',
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      IconButton(
-                        onPressed: () => _transformPosition((p) => p.flipped()),
-                        icon: const Icon(Icons.swap_vert, size: 20),
-                        tooltip: 'Flip up-down and swap sides',
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      // View-only rotation — the position is untouched.
-                      IconButton(
-                        onPressed: () =>
-                            setState(() => _viewFromBlack = !_viewFromBlack),
-                        icon: Icon(
-                          Icons.rotate_left,
-                          size: 20,
-                          color: _viewFromBlack
-                              ? Theme.of(context).colorScheme.primary
-                              : null,
-                        ),
-                        tooltip: _viewFromBlack
-                            ? "View from Red's side"
-                            : "View from Black's side",
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      const SizedBox(width: 4),
-                      // Side to move indicator / toggle
-                      GestureDetector(
-                        onTap: _isAnalyzing ? null : _toggleSideToMove,
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _position.sideToMove == PieceColor.red
-                                ? Colors.red
-                                : Colors.black87,
-                            border: Border.all(color: Colors.grey.shade400),
-                          ),
-                          child: Center(
-                            child: Text(
-                              _position.sideToMove == PieceColor.red
-                                  ? 'R'
-                                  : 'B',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Secondary controls
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Row(
-                    children: [
-                      TextButton.icon(
-                        onPressed: _isAnalyzing ? null : _resetPosition,
-                        icon: const Icon(Icons.restart_alt, size: 18),
-                        label: const Text('New'),
-                      ),
-                      IconButton(
-                        onPressed: _openGameFile,
-                        icon: const Icon(Icons.folder_open, size: 18),
-                        tooltip: 'Open game (.XQF or .pbg)',
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      IconButton(
-                        onPressed: _saveGameFile,
-                        icon: const Icon(Icons.save_outlined, size: 18),
-                        tooltip: 'Save game',
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      PopupMenuButton<String>(
-                        icon: const Icon(Icons.ios_share, size: 18),
-                        tooltip: 'Export',
-                        onSelected: (choice) => _exportGame(choice == 'html'),
-                        itemBuilder: (context) => const [
-                          PopupMenuItem(
-                            value: 'txt',
-                            child: Text('Export text…'),
-                          ),
-                          PopupMenuItem(
-                            value: 'html',
-                            child: Text('Export HTML with diagrams…'),
-                          ),
-                        ],
-                      ),
-                      IconButton(
-                        onPressed: _editGameInfo,
-                        icon: const Icon(Icons.info_outline, size: 18),
-                        tooltip: 'Game information',
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      TextButton.icon(
-                        onPressed: _isAnalyzing ? null : _clearBoard,
-                        icon: const Icon(Icons.clear_all, size: 18),
-                        label: const Text('Clear'),
-                      ),
-                      TextButton.icon(
-                        onPressed: _isAnalyzing
-                            ? null
-                            : () =>
-                                  setState(() => _isSetupMode = !_isSetupMode),
-                        icon: Icon(
-                          _isSetupMode ? Icons.check : Icons.edit,
-                          size: 18,
-                        ),
-                        label: Text(_isSetupMode ? 'Done' : 'Setup'),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: _openSettings,
-                        icon: const Icon(Icons.settings, size: 20),
-                        tooltip: 'Settings',
-                      ),
-                    ],
-                  ),
-                ),
-
-                const Divider(height: 1),
-
-                // Move list (only once moves have been played)
-                if (_game.root.children.isNotEmpty)
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: textScaler.scale(96),
-                    ),
-                    child: MoveTree(
-                      game: _game,
-                      current: _current,
-                      language: settings.language,
-                      onSelect: _goToNode,
-                      onDelete: _deleteNode,
-                      onPromote: _promoteNode,
-                    ),
-                  ),
-                if (_game.root.children.isNotEmpty) const Divider(height: 1),
-
-                // Engine analysis and cloud candidates in separate tabs
-                Expanded(
-                  child: DefaultTabController(
-                    length: 5,
-                    child: Column(
+                    child: Row(
                       children: [
-                        const TabBar(
-                          isScrollable: true,
-                          tabAlignment: TabAlignment.center,
-                          tabs: [
-                            Tab(text: 'Engine'),
-                            Tab(text: 'Notes'),
-                            Tab(text: 'Cloud'),
-                            Tab(text: 'Raw'),
-                            Tab(text: 'Score'),
-                          ],
-                        ),
                         Expanded(
-                          child: TabBarView(
-                            children: [
-                              // Scrolls internally so its stats row can stay
-                              // pinned to the bottom.
-                              AnalysisPanel(
-                                lines: _analysisLines,
-                                // While the search runs there is no bestmove
-                                // yet, so show the PV's current best/reply.
-                                bestMove:
-                                    _latestBestMove ??
-                                    (_bestUci == null
-                                        ? null
-                                        : BestMove(
-                                            move: _bestUci!,
-                                            ponder: _ponderUci,
-                                          )),
-                                position: _enginePosition ?? _position,
-                                bestMoveStale: !_engineMatchesBoard,
-                                language: settings.language,
-                                scorePerspective: settings.scorePerspective,
+                          child: TextField(
+                            controller: _fenController,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontFamily: 'monospace',
+                            ),
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
                               ),
-                              NotesPanel(
-                                node: _current,
-                                language: settings.language,
-                                onChanged: (text) =>
-                                    setState(() => _current.comment = text),
-                              ),
-                              SingleChildScrollView(
-                                child: CandidateMoves(
-                                  position: _position,
-                                  language: widget.settings.language,
-                                  scorePerspective:
-                                      widget.settings.scorePerspective,
-                                  onPlay: _playUci,
-                                ),
-                              ),
-                              EngineOutputView(log: _engineLog),
-                              ScoreChart(
-                                centipawns: _scoreByPly,
-                                plyLabels: _plyLabels,
-                                currentPly: _current.ply,
-                                onSelect: _goToPly,
-                              ),
-                            ],
+                              border: OutlineInputBorder(),
+                              hintText: 'FEN',
+                            ),
+                            onSubmitted: (_) => _applyFen(),
                           ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.check, size: 20),
+                          onPressed: _applyFen,
+                          tooltip: 'Apply FEN',
                         ),
                       ],
                     ),
                   ),
-                ),
 
-                // Engine status
-                if (!_engineReady)
-                  const Padding(
-                    padding: EdgeInsets.all(8),
+                  // Board — constrained to maxBoardWidth
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: maxBoardWidth,
+                        maxHeight: boardMaxHeight,
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: BoardWidget(
+                          position: _position,
+                          selectedSquare: _selectedSquare,
+                          // Each indicator is independently switchable in
+                          // settings; when off it is simply not passed.
+                          lastMoveFrom: settings.highlightLastMove
+                              ? _lastMoveFrom
+                              : null,
+                          lastMoveTo: settings.highlightLastMove
+                              ? _lastMoveTo
+                              : null,
+                          arrows: _boardArrows,
+                          viewFromBlack: _viewFromBlack,
+                          onSquareTap: _onSquareTap,
+                          language: settings.language,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Move navigation
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                        IconButton(
+                          onPressed: _canGoBack ? _goToStart : null,
+                          icon: const Icon(Icons.skip_previous, size: 22),
+                          tooltip: 'Go to start',
                         ),
-                        SizedBox(width: 8),
-                        Text('Loading engine...'),
+                        IconButton(
+                          onPressed: _canGoBack ? _goBack : null,
+                          icon: const Icon(Icons.chevron_left, size: 28),
+                          tooltip: 'Previous move',
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Text(
+                            '${_current.ply}/${_current.mainlineEnd.ply}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: _canGoForward ? _goForward : null,
+                          icon: const Icon(Icons.chevron_right, size: 28),
+                          tooltip: 'Next move',
+                        ),
+                        IconButton(
+                          onPressed: _canGoForward ? _goToEnd : null,
+                          icon: const Icon(Icons.skip_next, size: 22),
+                          tooltip: 'Go to end',
+                        ),
                       ],
                     ),
                   ),
-              ],
-            );
-          },
+
+                  // Controls
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    child: Row(
+                      children: [
+                        // Single button that starts or stops the search.
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: !_engineReady
+                                ? null
+                                : (_isAnalyzing
+                                      ? _stopAnalysis
+                                      : _startAnalysis),
+                            icon: Icon(
+                              _isAnalyzing ? Icons.stop : Icons.play_arrow,
+                              size: 18,
+                            ),
+                            label: Text(_isAnalyzing ? 'Stop' : 'Analyze'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _canPlayBestMove ? _playBestMove : null,
+                            icon: const Icon(Icons.done_all, size: 18),
+                            label: const Text('Play Best'),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        // Board transforms, next to the side-to-move indicator
+                        // they share a row with.
+                        IconButton(
+                          onPressed: () =>
+                              _transformPosition((p) => p.mirrored()),
+                          icon: const Icon(Icons.swap_horiz, size: 20),
+                          tooltip: 'Mirror left-right (a↔i)',
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        IconButton(
+                          onPressed: () =>
+                              _transformPosition((p) => p.flipped()),
+                          icon: const Icon(Icons.swap_vert, size: 20),
+                          tooltip: 'Flip up-down and swap sides',
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        // View-only rotation — the position is untouched.
+                        IconButton(
+                          onPressed: () =>
+                              setState(() => _viewFromBlack = !_viewFromBlack),
+                          icon: Icon(
+                            Icons.rotate_left,
+                            size: 20,
+                            color: _viewFromBlack
+                                ? Theme.of(context).colorScheme.primary
+                                : null,
+                          ),
+                          tooltip: _viewFromBlack
+                              ? "View from Red's side"
+                              : "View from Black's side",
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        const SizedBox(width: 4),
+                        // Side to move indicator / toggle
+                        GestureDetector(
+                          onTap: _isAnalyzing ? null : _toggleSideToMove,
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _position.sideToMove == PieceColor.red
+                                  ? Colors.red
+                                  : Colors.black87,
+                              border: Border.all(color: Colors.grey.shade400),
+                            ),
+                            child: Center(
+                              child: Text(
+                                _position.sideToMove == PieceColor.red
+                                    ? 'R'
+                                    : 'B',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Secondary controls
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      children: [
+                        TextButton.icon(
+                          onPressed: _isAnalyzing ? null : _resetPosition,
+                          icon: const Icon(Icons.restart_alt, size: 18),
+                          label: const Text('New'),
+                        ),
+                        IconButton(
+                          onPressed: _openGameFile,
+                          icon: const Icon(Icons.folder_open, size: 18),
+                          tooltip: 'Open game (.XQF or .pbg)',
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        IconButton(
+                          onPressed: _saveGameFile,
+                          icon: const Icon(Icons.save_outlined, size: 18),
+                          tooltip: 'Save game',
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.ios_share, size: 18),
+                          tooltip: 'Export',
+                          onSelected: (choice) => _exportGame(choice == 'html'),
+                          itemBuilder: (context) => const [
+                            PopupMenuItem(
+                              value: 'txt',
+                              child: Text('Export text…'),
+                            ),
+                            PopupMenuItem(
+                              value: 'html',
+                              child: Text('Export HTML with diagrams…'),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          onPressed: _editGameInfo,
+                          icon: const Icon(Icons.info_outline, size: 18),
+                          tooltip: 'Game information',
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        TextButton.icon(
+                          onPressed: _isAnalyzing ? null : _clearBoard,
+                          icon: const Icon(Icons.clear_all, size: 18),
+                          label: const Text('Clear'),
+                        ),
+                        TextButton.icon(
+                          onPressed: _isAnalyzing
+                              ? null
+                              : () => setState(
+                                  () => _isSetupMode = !_isSetupMode,
+                                ),
+                          icon: Icon(
+                            _isSetupMode ? Icons.check : Icons.edit,
+                            size: 18,
+                          ),
+                          label: Text(_isSetupMode ? 'Done' : 'Setup'),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          onPressed: _openSettings,
+                          icon: const Icon(Icons.settings, size: 20),
+                          tooltip: 'Settings',
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const Divider(height: 1),
+
+                  // Move list (only once moves have been played)
+                  if (_game.root.children.isNotEmpty)
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: textScaler.scale(96),
+                      ),
+                      child: MoveTree(
+                        game: _game,
+                        current: _current,
+                        language: settings.language,
+                        onSelect: _goToNode,
+                        onDelete: _deleteNode,
+                        onPromote: _promoteNode,
+                      ),
+                    ),
+                  if (_game.root.children.isNotEmpty) const Divider(height: 1),
+
+                  // Engine analysis and cloud candidates in separate tabs
+                  Expanded(
+                    child: DefaultTabController(
+                      length: 5,
+                      child: Column(
+                        children: [
+                          const TabBar(
+                            isScrollable: true,
+                            tabAlignment: TabAlignment.center,
+                            tabs: [
+                              Tab(text: 'Engine'),
+                              Tab(text: 'Notes'),
+                              Tab(text: 'Cloud'),
+                              Tab(text: 'Raw'),
+                              Tab(text: 'Score'),
+                            ],
+                          ),
+                          Expanded(
+                            child: TabBarView(
+                              children: [
+                                // Scrolls internally so its stats row can stay
+                                // pinned to the bottom.
+                                AnalysisPanel(
+                                  lines: _analysisLines,
+                                  // While the search runs there is no bestmove
+                                  // yet, so show the PV's current best/reply.
+                                  bestMove:
+                                      _latestBestMove ??
+                                      (_bestUci == null
+                                          ? null
+                                          : BestMove(
+                                              move: _bestUci!,
+                                              ponder: _ponderUci,
+                                            )),
+                                  position: _enginePosition ?? _position,
+                                  bestMoveStale: !_engineMatchesBoard,
+                                  language: settings.language,
+                                  scorePerspective: settings.scorePerspective,
+                                ),
+                                NotesPanel(
+                                  node: _current,
+                                  language: settings.language,
+                                  onChanged: (text) =>
+                                      setState(() => _current.comment = text),
+                                ),
+                                SingleChildScrollView(
+                                  child: CandidateMoves(
+                                    position: _position,
+                                    language: widget.settings.language,
+                                    scorePerspective:
+                                        widget.settings.scorePerspective,
+                                    onPlay: _playUci,
+                                  ),
+                                ),
+                                EngineOutputView(log: _engineLog),
+                                ScoreChart(
+                                  centipawns: _scoreByPly,
+                                  plyLabels: _plyLabels,
+                                  currentPly: _current.ply,
+                                  onSelect: _goToPly,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Engine status
+                  if (!_engineReady)
+                    const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 8),
+                          Text('Loading engine...'),
+                        ],
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
         ),
+      ),
+    );
+  }
+
+  /// Wrap [child] so a game file dropped on the window opens.
+  ///
+  /// Only desktop gets a drop target: the plugin has no iOS side, and there is
+  /// nothing to drag there anyway.
+  Widget _withFileDrop(Widget child) {
+    if (!(Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
+      return child;
+    }
+    final theme = Theme.of(context);
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dragging = true),
+      onDragExited: (_) => setState(() => _dragging = false),
+      onDragDone: (details) => _openDropped(details.files),
+      child: Stack(
+        children: [
+          child,
+          if (_dragging)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ColoredBox(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                  child: Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: theme.colorScheme.primary,
+                          width: 2,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 14,
+                        ),
+                        child: Text(
+                          'Drop to open  (.XQF, .pbg, .xqg)',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
