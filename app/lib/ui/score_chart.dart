@@ -1,8 +1,11 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../engine/search_info.dart';
 import '../models/position.dart';
+import '../models/settings.dart';
 import 'board_widget.dart';
+import 'hover_preview.dart';
 
 /// A stored evaluation for one position: [cp] is centipawns from Red's point
 /// of view, [depth] the search that produced it so deeper results can win, and
@@ -93,6 +96,10 @@ class ScoreChart extends StatefulWidget {
   final int? analysedCount;
   final int? analysisTotal;
 
+  /// Show the board preview alongside the hover readout.
+  final bool showPreview;
+  final DisplayLanguage language;
+
   const ScoreChart({
     super.key,
     required this.points,
@@ -102,6 +109,8 @@ class ScoreChart extends StatefulWidget {
     this.onCancelAnalysis,
     this.analysedCount,
     this.analysisTotal,
+    this.showPreview = true,
+    this.language = DisplayLanguage.simplified,
   });
 
   bool get isAnalysing => analysedCount != null && analysisTotal != null;
@@ -144,6 +153,10 @@ class ScoreChart extends StatefulWidget {
 class _ScoreChartState extends State<ScoreChart> {
   int? _hoverPly;
 
+  // The readout lives in the app overlay so the panel cannot clip it.
+  final _previewController = OverlayPortalController();
+  Offset _pointer = Offset.zero;
+
   List<int?> get _scores => [for (final point in widget.points) point.cp];
 
   @override
@@ -172,23 +185,35 @@ class _ScoreChartState extends State<ScoreChart> {
           padding: const EdgeInsets.fromLTRB(12, 8, 6, 0),
           child: Row(
             children: [
-              Text(
-                'Score (Red +)',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: theme.colorScheme.primary,
+              // The heading and coverage share whatever the score and buttons
+              // leave, so a narrow panel truncates them instead of overflowing.
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'Score (Red +)',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: theme.colorScheme.primary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        widget.isAnalysing
+                            ? 'analysing ${widget.analysedCount} of ${widget.analysisTotal}'
+                            : '$known of ${centipawns.length} positions',
+                        style: TextStyle(fontSize: 12, color: theme.hintColor),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  widget.isAnalysing
-                      ? 'analysing ${widget.analysedCount} of ${widget.analysisTotal}'
-                      : '$known of ${centipawns.length} positions',
-                  style: TextStyle(fontSize: 12, color: theme.hintColor),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const Spacer(),
               if (current != null || !widget.isAnalysing)
                 Text(
                   current == null
@@ -244,38 +269,42 @@ class _ScoreChartState extends State<ScoreChart> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final size = Size(constraints.maxWidth, constraints.maxHeight);
-                return MouseRegion(
-                  onHover: (event) => _setHover(event.localPosition, size),
-                  onExit: (_) => setState(() => _hoverPly = null),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTapDown: widget.onSelect == null
-                        ? null
-                        : (details) => widget.onSelect!(
-                            plyAt(details.localPosition.dx, size.width),
-                          ),
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: CustomPaint(
-                            painter: _ScorePainter(
-                              centipawns: centipawns,
-                              range: range,
-                              currentPly: widget.currentPly,
-                              hoverPly: _hoverPly,
-                              lineColor: theme.colorScheme.onSurface,
-                              zeroLineColor: theme.colorScheme.onSurface
-                                  .withValues(alpha: 0.55),
-                              gridColor: theme.dividerColor,
-                              labelColor: theme.hintColor,
-                              negativeFill: theme.colorScheme.onSurface
-                                  .withValues(alpha: 0.18),
+                return OverlayPortal(
+                  controller: _previewController,
+                  overlayChildBuilder: (overlayContext) => placePreview(
+                    screen: MediaQuery.sizeOf(overlayContext),
+                    pointer: _pointer,
+                    size: _cardSize(),
+                    child: _hoverCard(overlayContext),
+                  ),
+                  child: MouseRegion(
+                    onHover: (event) => _setHover(event, size),
+                    onExit: (_) => _clearHover(),
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapDown: widget.onSelect == null
+                          ? null
+                          : (details) => widget.onSelect!(
+                              plyAt(details.localPosition.dx, size.width),
                             ),
+                      child: CustomPaint(
+                        painter: _ScorePainter(
+                          centipawns: centipawns,
+                          range: range,
+                          currentPly: widget.currentPly,
+                          hoverPly: _hoverPly,
+                          lineColor: theme.colorScheme.onSurface,
+                          zeroLineColor: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.55,
+                          ),
+                          gridColor: theme.dividerColor,
+                          labelColor: theme.hintColor,
+                          negativeFill: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.18,
                           ),
                         ),
-                        if (_hoverPly != null && centipawns[_hoverPly!] != null)
-                          _hoverCard(context, size, _hoverPly!, range),
-                      ],
+                        child: const SizedBox.expand(),
+                      ),
                     ),
                   ),
                 );
@@ -286,9 +315,24 @@ class _ScoreChartState extends State<ScoreChart> {
     );
   }
 
-  void _setHover(Offset local, Size size) {
-    final ply = plyAt(local.dx, size.width);
-    if (ply != _hoverPly) setState(() => _hoverPly = ply);
+  void _setHover(PointerHoverEvent event, Size size) {
+    final ply = plyAt(event.localPosition.dx, size.width);
+    setState(() {
+      _hoverPly = ply;
+      _pointer = event.position;
+    });
+    final hasScore =
+        ply < widget.points.length && widget.points[ply].cp != null;
+    if (hasScore) {
+      if (!_previewController.isShowing) _previewController.show();
+    } else if (_previewController.isShowing) {
+      _previewController.hide();
+    }
+  }
+
+  void _clearHover() {
+    setState(() => _hoverPly = null);
+    if (_previewController.isShowing) _previewController.hide();
   }
 
   /// The ply nearest to a tap or pointer at [dx] within a chart [width] wide.
@@ -299,193 +343,69 @@ class _ScoreChartState extends State<ScoreChart> {
     return (t * (widget.points.length - 1)).round();
   }
 
+  /// Rows the readout shows under the board, so its size is known before it
+  /// is built.
+  List<PreviewRow> _previewRows(ScorePoint point) => [
+    if (point.bestMoveText != null)
+      PreviewRow(
+        label: 'Best',
+        text: point.bestMoveText!,
+        colour: Colors.green.shade600,
+        trailing: point.cp == null ? null : scoreLabel(point.cp!),
+      ),
+    if (point.playedMoveText != null && !point.playedTheBest)
+      PreviewRow(
+        label: 'Played',
+        text: point.playedMoveText!,
+        colour: Colors.amber.shade700,
+        trailing: point.playedCp == null ? null : scoreLabel(point.playedCp!),
+      )
+    else if (point.playedTheBest)
+      PreviewRow(
+        label: 'Played',
+        text: "the engine's move",
+        colour: Colors.amber.shade700,
+      ),
+  ];
+
+  Size _cardSize() {
+    final ply = _hoverPly;
+    if (ply == null || ply >= widget.points.length) {
+      return MovePreviewCard.sizeFor(rowCount: 0, hasSubtitle: true);
+    }
+    return MovePreviewCard.sizeFor(
+      rowCount: widget.showPreview
+          ? _previewRows(widget.points[ply]).length
+          : 0,
+      hasSubtitle: true,
+    );
+  }
+
   /// Readout for the position under the pointer: what it is, what it is worth,
   /// how it looks, and how the move played compares with the engine's choice.
-  Widget _hoverCard(BuildContext context, Size size, int ply, double range) {
-    final theme = Theme.of(context);
+  Widget _hoverCard(BuildContext context) {
+    final ply = _hoverPly!;
     final point = widget.points[ply];
-    final cp = point.cp!;
-    final plot = _plotRect(size);
-    final x = widget.points.length < 2
-        ? plot.center.dx
-        : plot.left + plot.width * (ply / (widget.points.length - 1));
-    final y =
-        plot.center.dy - (cp.clamp(-range, range) / range) * (plot.height / 2);
-
-    // A preview only earns its space when the chart is tall enough for it.
-    final showBoard = size.height >= 190;
-    const cardWidth = 172.0;
-    final cardHeight = showBoard ? 232.0 : 96.0;
-    final left = (x + 12).clamp(
-      0.0,
-      (size.width - cardWidth).clamp(0.0, size.width),
-    );
-    final top = (y - cardHeight / 2).clamp(
-      0.0,
-      (size.height - cardHeight).clamp(0.0, size.height),
-    );
-
-    return Positioned(
-      left: left,
-      top: top,
-      width: cardWidth,
-      child: IgnorePointer(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: theme.dividerColor),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 4,
-                offset: Offset(0, 2),
-              ),
-            ],
+    final depth = point.depth;
+    return MovePreviewCard(
+      title: point.label,
+      subtitle:
+          '${point.cp == null ? '' : 'score ${scoreLabel(point.cp!)}'}'
+          '${depth == null ? '' : '   depth $depth'}',
+      position: point.position,
+      language: widget.language,
+      arrows: [
+        if (point.bestMoveUci != null && point.bestMoveUci!.length >= 4)
+          BoardArrow(
+            from: Position.uciToSquare(point.bestMoveUci!.substring(0, 2))!,
+            to: Position.uciToSquare(point.bestMoveUci!.substring(2, 4))!,
+            side: point.position.sideToMove,
+            label: '1',
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      point.label,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  Text(
-                    scoreLabel(cp),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontFamily: 'monospace',
-                      fontWeight: FontWeight.bold,
-                      color: cp >= 0
-                          ? Colors.red.shade600
-                          : theme.colorScheme.onSurface,
-                    ),
-                  ),
-                ],
-              ),
-              if (showBoard) ...[
-                const SizedBox(height: 4),
-                // The board as it stood, with the engine's move drawn on it.
-                SizedBox(
-                  width: cardWidth - 16,
-                  child: BoardWidget(
-                    position: point.position,
-                    arrows: [
-                      if (point.bestMoveUci != null &&
-                          point.bestMoveUci!.length >= 4)
-                        BoardArrow(
-                          from: Position.uciToSquare(
-                            point.bestMoveUci!.substring(0, 2),
-                          )!,
-                          to: Position.uciToSquare(
-                            point.bestMoveUci!.substring(2, 4),
-                          )!,
-                          side: point.position.sideToMove,
-                          label: '1',
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-              const SizedBox(height: 4),
-              if (point.bestMoveText != null)
-                _moveRow(
-                  theme,
-                  colour: Colors.green.shade600,
-                  label: 'Best',
-                  move: point.bestMoveText!,
-                  score: cp,
-                ),
-              if (point.playedMoveText != null && !point.playedTheBest)
-                _moveRow(
-                  theme,
-                  colour: Colors.amber.shade700,
-                  label: 'Played',
-                  move: point.playedMoveText!,
-                  score: point.playedCp,
-                )
-              else if (point.playedTheBest)
-                Padding(
-                  padding: const EdgeInsets.only(top: 2),
-                  child: Text(
-                    'Played the engine\'s move',
-                    style: TextStyle(fontSize: 11, color: theme.hintColor),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
+      ],
+      rows: _previewRows(point),
     );
   }
-
-  /// One labelled move line in the readout, colour-coded so the engine's
-  /// choice and what was actually played cannot be confused.
-  Widget _moveRow(
-    ThemeData theme, {
-    required Color colour,
-    required String label,
-    required String move,
-    required int? score,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 2),
-      child: Row(
-        children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: colour),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              color: theme.hintColor,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 5),
-          Expanded(
-            child: Text(
-              move,
-              style: const TextStyle(fontSize: 12),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (score != null)
-            Text(
-              scoreLabel(score),
-              style: TextStyle(
-                fontSize: 11,
-                fontFamily: 'monospace',
-                color: theme.hintColor,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Rect _plotRect(Size size) => Rect.fromLTRB(
-    ScoreChart.padding.left,
-    ScoreChart.padding.top,
-    size.width - ScoreChart.padding.right,
-    size.height - ScoreChart.padding.bottom,
-  );
 }
 
 /// Exact score for display: mates as M+/M-, everything else signed centipawns.

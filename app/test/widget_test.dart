@@ -13,6 +13,7 @@ import 'package:app/services/chessdb.dart';
 import 'package:app/ui/analysis_panel.dart';
 import 'package:app/models/move_rules.dart';
 import 'package:app/ui/board_widget.dart';
+import 'package:app/ui/hover_preview.dart';
 import 'package:app/ui/engine_output.dart';
 import 'package:app/models/game.dart';
 import 'package:app/ui/move_tree.dart';
@@ -746,13 +747,13 @@ void main() {
       await mouse.moveTo(Offset(rect.right - 16, rect.center.dy));
       await tester.pump();
       expect(find.text('1... 马8进7'), findsOneWidget);
-      expect(find.text('+340'), findsWidgets);
+      expect(find.textContaining('+340'), findsWidgets);
 
       // Moving to another point swaps the readout ...
       await mouse.moveTo(Offset(rect.center.dx, rect.center.dy));
       await tester.pump();
       expect(find.text('1. 炮二平五'), findsOneWidget);
-      expect(find.text('-25'), findsWidgets);
+      expect(find.textContaining('-25'), findsWidgets);
 
       // ... and leaving the chart dismisses it.
       await mouse.moveTo(const Offset(-50, -50));
@@ -805,17 +806,22 @@ void main() {
       expect(board.arrows.single.side, PieceColor.red);
     });
 
-    testWidgets('a short chart drops the preview but keeps the numbers', (
+    testWidgets('the readout stays inside the window, however small', (
       tester,
     ) async {
+      // A panel far smaller than the card, so an in-panel card would be cut off.
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: SizedBox(
-              height: 120,
-              child: ScoreChart(
-                points: _points([40, -60], best: ['h2e2', null]),
-                currentPly: 0,
+            body: Align(
+              alignment: Alignment.bottomRight,
+              child: SizedBox(
+                width: 200,
+                height: 110,
+                child: ScoreChart(
+                  points: _points([40, -60], best: ['h2e2', null]),
+                  currentPly: 0,
+                ),
               ),
             ),
           ),
@@ -826,11 +832,20 @@ void main() {
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await mouse.addPointer(location: Offset.zero);
       addTearDown(mouse.removePointer);
-      await mouse.moveTo(Offset(rect.left + 10, rect.center.dy));
+      // Hover the bottom-right corner: the worst case for placement.
+      await mouse.moveTo(Offset(rect.right - 4, rect.bottom - 4));
       await tester.pump();
 
-      expect(find.byType(BoardWidget), findsNothing);
-      expect(find.text('Best'), findsOneWidget);
+      final card = find.byType(MovePreviewCard);
+      expect(card, findsOneWidget);
+      final cardRect = tester.getRect(card);
+      final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+      expect(cardRect.left, greaterThanOrEqualTo(0));
+      expect(cardRect.top, greaterThanOrEqualTo(0));
+      expect(cardRect.right, lessThanOrEqualTo(screen.width));
+      expect(cardRect.bottom, lessThanOrEqualTo(screen.height));
+      // It really is the full card, board and all.
+      expect(find.byType(BoardWidget), findsOneWidget);
     });
 
     testWidgets('offers whole-game analysis and reports its progress', (

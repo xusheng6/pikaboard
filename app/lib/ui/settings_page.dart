@@ -67,6 +67,28 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (v) => _apply(_current.copyWith(enforceRules: v)),
           ),
           const Divider(),
+          _sectionHeader(context, 'Hover previews'),
+          SwitchListTile(
+            title: const Text('Score chart'),
+            subtitle: const Text(
+              "Preview the position, the engine's move and the move played",
+            ),
+            value: _current.previewOnChart,
+            onChanged: (v) => _apply(_current.copyWith(previewOnChart: v)),
+          ),
+          SwitchListTile(
+            title: const Text('Move list'),
+            subtitle: const Text('Preview the position a move leads to'),
+            value: _current.previewOnMoveTree,
+            onChanged: (v) => _apply(_current.copyWith(previewOnMoveTree: v)),
+          ),
+          SwitchListTile(
+            title: const Text('Engine lines'),
+            subtitle: const Text('Preview any move inside an engine line'),
+            value: _current.previewOnEngineLine,
+            onChanged: (v) => _apply(_current.copyWith(previewOnEngineLine: v)),
+          ),
+          const Divider(),
           _sectionHeader(context, 'Board highlights'),
           SwitchListTile(
             title: const Text('Last move played'),

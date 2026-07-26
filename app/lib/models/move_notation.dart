@@ -128,6 +128,29 @@ class MoveNotation {
 
   /// Convert a PV string (space-separated UCI moves) to notation for [lang].
   /// Applies moves sequentially to track position changes.
+  /// A principal variation broken into its moves, each with the position it
+  /// leads to — what the UI needs to make a line's moves individually
+  /// hoverable.
+  static List<({String uci, String notation, Position before, Position after})>
+  pvSteps(String pvText, Position startPosition, DisplayLanguage lang) {
+    final steps =
+        <({String uci, String notation, Position before, Position after})>[];
+    if (pvText.trim().isEmpty) return steps;
+    var pos = startPosition;
+    for (final uci in pvText.trim().split(RegExp(r'\s+'))) {
+      if (uci.length < 4) continue;
+      final after = applyUciMove(pos, uci);
+      steps.add((
+        uci: uci,
+        notation: toNotation(uci, pos, lang),
+        before: pos,
+        after: after,
+      ));
+      pos = after;
+    }
+    return steps;
+  }
+
   static String pvToNotation(
     String pvText,
     Position startPosition,

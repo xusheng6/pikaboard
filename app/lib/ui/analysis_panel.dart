@@ -4,6 +4,8 @@ import '../models/move_notation.dart';
 import '../models/piece.dart';
 import '../models/position.dart';
 import '../models/settings.dart';
+import 'board_widget.dart';
+import 'hover_preview.dart';
 
 /// Formats [info]'s score for display.
 ///
@@ -54,6 +56,9 @@ class AnalysisLine {
 }
 
 class AnalysisPanel extends StatelessWidget {
+  /// Preview the position a move in a line leads to while it is hovered.
+  final bool showPreview;
+
   /// Rows to show, current-position lines first (deepest on top) followed by
   /// any stale previous-position lines.
   final List<AnalysisLine> lines;
@@ -76,6 +81,7 @@ class AnalysisPanel extends StatelessWidget {
     this.bestMoveStale = false,
     this.language = DisplayLanguage.simplified,
     this.scorePerspective = ScorePerspective.red,
+    this.showPreview = true,
   });
 
   @override
@@ -110,6 +116,7 @@ class AnalysisPanel extends StatelessWidget {
                       line: line,
                       language: language,
                       scorePerspective: scorePerspective,
+                      showPreview: showPreview,
                     ),
                 ],
               ],
@@ -242,11 +249,13 @@ class _LineRow extends StatelessWidget {
   final AnalysisLine line;
   final DisplayLanguage language;
   final ScorePerspective scorePerspective;
+  final bool showPreview;
 
   const _LineRow({
     required this.line,
     required this.language,
     required this.scorePerspective,
+    this.showPreview = true,
   });
 
   @override
@@ -302,12 +311,22 @@ class _LineRow extends StatelessWidget {
           ),
           const SizedBox(width: _kColumnGap),
           Expanded(
-            child: Text(
-              MoveNotation.pvToNotation(info.pvText, line.position, language),
-              style: const TextStyle(fontSize: 13),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+            child: showPreview
+                ? _PvMoves(
+                    pvText: info.pvText,
+                    position: line.position,
+                    language: language,
+                  )
+                : Text(
+                    MoveNotation.pvToNotation(
+                      info.pvText,
+                      line.position,
+                      language,
+                    ),
+                    style: const TextStyle(fontSize: 13),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
           ),
         ],
       ),
@@ -315,5 +334,63 @@ class _LineRow extends StatelessWidget {
 
     // Grey out lines that belong to a previous board position.
     return line.stale ? Opacity(opacity: 0.4, child: row) : row;
+  }
+}
+
+/// A line's moves, each hoverable to preview the position it leads to.
+class _PvMoves extends StatelessWidget {
+  final String pvText;
+  final Position position;
+  final DisplayLanguage language;
+
+  const _PvMoves({
+    required this.pvText,
+    required this.position,
+    required this.language,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final steps = MoveNotation.pvSteps(pvText, position, language);
+    if (steps.isEmpty) return const SizedBox.shrink();
+
+    // Wrapped rather than one string so each move can be hovered; clipped to
+    // two lines like the plain text it replaces.
+    return ClipRect(
+      child: SizedBox(
+        height: MediaQuery.textScalerOf(context).scale(38),
+        child: Wrap(
+          spacing: 4,
+          runSpacing: 2,
+          children: [
+            for (var i = 0; i < steps.length; i++)
+              HoverPreview(
+                previewSize: MovePreviewCard.sizeFor(
+                  rowCount: 0,
+                  hasSubtitle: true,
+                ),
+                previewBuilder: (context) => MovePreviewCard(
+                  title: steps[i].notation,
+                  subtitle: 'after ${i + 1} of ${steps.length} in this line',
+                  position: steps[i].after,
+                  language: language,
+                  arrows: [
+                    BoardArrow(
+                      from: Position.uciToSquare(steps[i].uci.substring(0, 2))!,
+                      to: Position.uciToSquare(steps[i].uci.substring(2, 4))!,
+                      side: steps[i].before.sideToMove,
+                      label: '',
+                    ),
+                  ],
+                ),
+                child: Text(
+                  steps[i].notation,
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }

@@ -53,6 +53,15 @@ class Settings {
   /// arbitrary positions can still be built.
   final bool enforceRules;
 
+  /// Show a board preview when hovering a point on the score chart.
+  final bool previewOnChart;
+
+  /// Show a board preview when hovering a move in the move tree.
+  final bool previewOnMoveTree;
+
+  /// Show a board preview when hovering a move in an engine line.
+  final bool previewOnEngineLine;
+
   const Settings({
     this.theme = ThemeSetting.dark,
     this.language = DisplayLanguage.simplified,
@@ -62,6 +71,9 @@ class Settings {
     this.highlightBestMove = true,
     this.highlightPonderMove = true,
     this.enforceRules = true,
+    this.previewOnChart = true,
+    this.previewOnMoveTree = true,
+    this.previewOnEngineLine = true,
   });
 
   Settings copyWith({
@@ -73,6 +85,9 @@ class Settings {
     bool? highlightBestMove,
     bool? highlightPonderMove,
     bool? enforceRules,
+    bool? previewOnChart,
+    bool? previewOnMoveTree,
+    bool? previewOnEngineLine,
   }) {
     return Settings(
       theme: theme ?? this.theme,
@@ -83,6 +98,9 @@ class Settings {
       highlightBestMove: highlightBestMove ?? this.highlightBestMove,
       highlightPonderMove: highlightPonderMove ?? this.highlightPonderMove,
       enforceRules: enforceRules ?? this.enforceRules,
+      previewOnChart: previewOnChart ?? this.previewOnChart,
+      previewOnMoveTree: previewOnMoveTree ?? this.previewOnMoveTree,
+      previewOnEngineLine: previewOnEngineLine ?? this.previewOnEngineLine,
     );
   }
 
@@ -95,6 +113,9 @@ class Settings {
     'highlightBestMove': highlightBestMove,
     'highlightPonderMove': highlightPonderMove,
     'enforceRules': enforceRules,
+    'previewOnChart': previewOnChart,
+    'previewOnMoveTree': previewOnMoveTree,
+    'previewOnEngineLine': previewOnEngineLine,
   };
 
   factory Settings.fromJson(Map<String, dynamic> json) {
@@ -123,6 +144,11 @@ class Settings {
       highlightPonderMove:
           json['highlightPonderMove'] as bool? ?? d.highlightPonderMove,
       enforceRules: json['enforceRules'] as bool? ?? d.enforceRules,
+      previewOnChart: json['previewOnChart'] as bool? ?? d.previewOnChart,
+      previewOnMoveTree:
+          json['previewOnMoveTree'] as bool? ?? d.previewOnMoveTree,
+      previewOnEngineLine:
+          json['previewOnEngineLine'] as bool? ?? d.previewOnEngineLine,
     );
   }
 }

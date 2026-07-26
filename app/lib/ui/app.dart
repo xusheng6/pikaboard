@@ -1510,6 +1510,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                                   onCancelAnalysis: _cancelWholeGameAnalysis,
                                   analysedCount: _batchDone,
                                   analysisTotal: _batchTotal,
+                                  showPreview: settings.previewOnChart,
+                                  language: settings.language,
                                 ),
                               ],
                             ),

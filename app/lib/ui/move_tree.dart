@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../models/game.dart';
 import '../models/move_notation.dart';
+import '../models/position.dart';
 import '../models/settings.dart';
+import 'board_widget.dart';
+import 'hover_preview.dart';
 
 /// The moves of a game, main line first with variations nested under the move
 /// they branch from.
@@ -23,6 +26,12 @@ class MoveTree extends StatelessWidget {
   /// Called to make a variation the main line.
   final ValueChanged<GameNode>? onPromote;
 
+  /// Preview the position a move leads to while it is hovered.
+  final bool showPreview;
+
+  /// Score for a position, shown in the preview when one is known.
+  final String? Function(GameNode node)? scoreLabelFor;
+
   const MoveTree({
     super.key,
     required this.game,
@@ -30,6 +39,8 @@ class MoveTree extends StatelessWidget {
     required this.onSelect,
     this.onDelete,
     this.onPromote,
+    this.showPreview = true,
+    this.scoreLabelFor,
     this.language = DisplayLanguage.simplified,
   });
 
@@ -167,12 +178,39 @@ class MoveTree extends StatelessWidget {
     );
 
     final canEdit = !node.isRoot && (onDelete != null || onPromote != null);
-    return InkWell(
+    final tappable = InkWell(
       onTap: () => onSelect(node),
       onLongPress: canEdit ? () => _showActions(context, node) : null,
       onSecondaryTap: canEdit ? () => _showActions(context, node) : null,
       borderRadius: BorderRadius.circular(4),
       child: chip,
+    );
+
+    if (!showPreview || node.isRoot) return tappable;
+    final score = scoreLabelFor?.call(node);
+    return HoverPreview(
+      previewSize: MovePreviewCard.sizeFor(
+        rowCount: 0,
+        hasSubtitle: score != null || node.comment.isNotEmpty,
+      ),
+      previewBuilder: (context) => MovePreviewCard(
+        title: _moveLabel(node),
+        subtitle: score != null
+            ? 'score $score'
+            : (node.comment.isEmpty ? null : node.comment),
+        position: node.position,
+        language: language,
+        arrows: [
+          if (node.move != null && node.parent != null)
+            BoardArrow(
+              from: Position.uciToSquare(node.move!.substring(0, 2))!,
+              to: Position.uciToSquare(node.move!.substring(2, 4))!,
+              side: node.parent!.position.sideToMove,
+              label: '',
+            ),
+        ],
+      ),
+      child: tappable,
     );
   }
 
