@@ -482,6 +482,28 @@ void main() {
       log.dispose();
     });
 
+    testWidgets('log text follows the font size setting', (tester) async {
+      final log = EngineLog()..add('info depth 12 pv b0c2');
+
+      Future<double> heightAt(double scale) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+              child: Scaffold(body: EngineOutputView(log: log)),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 200));
+        return tester.getSize(find.text('info depth 12 pv b0c2')).height;
+      }
+
+      final small = await heightAt(1.0);
+      final large = await heightAt(2.0);
+      expect(large, greaterThan(small));
+      log.dispose();
+    });
+
     testWidgets('shows a placeholder while the engine is quiet', (
       tester,
     ) async {

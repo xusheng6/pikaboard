@@ -134,7 +134,9 @@ class EngineOutputView extends StatelessWidget {
                           return Text(
                             line,
                             style: TextStyle(
-                              fontSize: 11,
+                              // Same base size as the analysis rows so the
+                              // font size setting moves it by as much.
+                              fontSize: 13,
                               fontFamily: 'monospace',
                               height: 1.35,
                               color: isCommand
