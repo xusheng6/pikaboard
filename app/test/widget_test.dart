@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,7 +14,8 @@ import 'package:app/ui/analysis_panel.dart';
 import 'package:app/models/move_rules.dart';
 import 'package:app/ui/board_widget.dart';
 import 'package:app/ui/engine_output.dart';
-import 'package:app/ui/move_list.dart';
+import 'package:app/models/game.dart';
+import 'package:app/ui/move_tree.dart';
 import 'package:app/ui/score_chart.dart';
 
 SearchInfo _line(int depth, {int scoreCp = 0, required String pv}) {
@@ -832,45 +835,147 @@ void main() {
     });
   });
 
-  group('MoveList', () {
-    testWidgets('renders numbered moves and navigates on tap', (tester) async {
-      final p0 = Position.startPosition();
-      final p1 = MoveNotation.applyUciMove(p0, 'b0c2');
-      final p2 = MoveNotation.applyUciMove(p1, 'b9c7');
-      int? selected;
+  group('Game tree', () {
+    test('replaying a move reuses its node, a new move branches', () {
+      final game = Game.fromPosition(Position.startPosition());
+      final first = game.root.addMove('b0c2');
+      expect(identical(game.root.addMove('b0c2'), first), isTrue);
+      expect(game.root.children.length, 1);
+
+      final alternative = game.root.addMove('h2e2');
+      expect(game.root.children.length, 2);
+      expect(first.isMainline, isTrue);
+      expect(alternative.isMainline, isFalse);
+
+      // Promoting swaps which line the game reads through.
+      alternative.promote();
+      expect(alternative.isMainline, isTrue);
+      expect(first.isMainline, isFalse);
+
+      // Deleting detaches the subtree.
+      alternative.remove();
+      expect(game.root.children.length, 1);
+      expect(game.root.children.single, first);
+    });
+
+    test('nodes know their ply, move number and side', () {
+      final game = Game.fromMoves(Position.startPosition(), [
+        'b0c2',
+        'b9c7',
+        'h2e2',
+      ]);
+      final path = game.root.mainlineEnd.pathFromRoot;
+      expect(path.length, 4);
+      expect(path.first.isRoot, isTrue);
+      expect(path[1].ply, 1);
+      expect(path[1].moveNumber, 1);
+      expect(path[1].isRedMove, isTrue);
+      expect(path[2].moveNumber, 1);
+      expect(path[2].isRedMove, isFalse);
+      expect(path[3].moveNumber, 2);
+      expect(game.mainlineLength, 3);
+    });
+
+    test('a game round-trips through json with its branches and notes', () {
+      final game = Game.fromMoves(Position.startPosition(), ['b0c2', 'b9c7']);
+      game.root.children.first.comment = 'Knight out';
+      game.root.addMove('h2e2').comment = 'Central cannon instead';
+      game.metadata
+        ..title = '测试对局'
+        ..red = 'Red'
+        ..black = 'Black'
+        ..result = GameResult.draw;
+
+      final restored = Game.fromJson(
+        jsonDecode(jsonEncode(game.toJson())) as Map<String, dynamic>,
+      );
+      expect(restored.initialPosition.toFen(), game.initialPosition.toFen());
+      expect(restored.metadata.title, '测试对局');
+      expect(restored.metadata.result, GameResult.draw);
+      expect(restored.root.children.length, 2);
+      expect(restored.root.children.first.comment, 'Knight out');
+      expect(restored.root.children[1].comment, 'Central cannon instead');
+      // Positions are replayed, not stored.
+      expect(
+        restored.root.mainlineEnd.position.toFen(),
+        game.root.mainlineEnd.position.toFen(),
+      );
+    });
+  });
+
+  group('MoveTree', () {
+    testWidgets('renders numbered moves and selects on tap', (tester) async {
+      final game = Game.fromMoves(Position.startPosition(), ['b0c2', 'b9c7']);
+      GameNode? selected;
 
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: MoveList(
-              history: [p0, p1, p2],
-              currentIndex: 2,
+            body: MoveTree(
+              game: game,
+              current: game.root.mainlineEnd,
               language: DisplayLanguage.simplified,
-              onSelect: (i) => selected = i,
+              onSelect: (node) => selected = node,
             ),
           ),
         ),
       );
 
-      // First move is numbered "1." and reconstructed as a knight move.
       final firstMove = find.textContaining('1.');
       expect(firstMove, findsOneWidget);
       expect(tester.widget<Text>(firstMove).data, contains('马'));
 
-      // Tapping the first ply navigates to history index 1.
       await tester.tap(firstMove);
-      expect(selected, 1);
+      expect(selected, game.root.children.first);
     });
 
-    testWidgets('shows placeholder with no moves', (tester) async {
+    testWidgets('variations are shown indented under the move they replace', (
+      tester,
+    ) async {
+      final game = Game.fromMoves(Position.startPosition(), ['b0c2', 'b9c7']);
+      final variation = game.root.addMove('h2e2');
+      variation.addMove('h9g7');
+
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: MoveList(
-              history: [Position.startPosition()],
-              currentIndex: 0,
-              onSelect: (_) {},
-            ),
+            body: MoveTree(game: game, current: game.root, onSelect: (_) {}),
+          ),
+        ),
+      );
+
+      // Both the main line's first move and its alternative are on screen ...
+      final mainline = find.textContaining('1. 马');
+      final alternative = find.textContaining('1. 炮');
+      expect(mainline, findsOneWidget);
+      expect(alternative, findsOneWidget);
+      // ... with the variation indented to the right of the main line.
+      expect(
+        tester.getTopLeft(alternative).dx,
+        greaterThan(tester.getTopLeft(mainline).dx),
+      );
+    });
+
+    testWidgets('annotated moves are flagged', (tester) async {
+      final game = Game.fromMoves(Position.startPosition(), ['b0c2']);
+      game.root.children.first.comment = 'good';
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MoveTree(game: game, current: game.root, onSelect: (_) {}),
+          ),
+        ),
+      );
+      expect(find.byIcon(Icons.chat_bubble), findsOneWidget);
+    });
+
+    testWidgets('shows placeholder with no moves', (tester) async {
+      final game = Game.fromPosition(Position.startPosition());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MoveTree(game: game, current: game.root, onSelect: (_) {}),
           ),
         ),
       );

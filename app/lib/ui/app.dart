@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../engine/pikafish_engine.dart';
 import '../engine/search_info.dart';
+import '../models/game.dart';
 import '../models/move_notation.dart';
 import '../models/move_rules.dart';
 import '../models/piece.dart';
@@ -13,7 +14,8 @@ import 'board_widget.dart';
 import 'analysis_panel.dart';
 import 'candidate_moves.dart';
 import 'engine_output.dart';
-import 'move_list.dart';
+import 'move_tree.dart';
+import 'notes_panel.dart';
 import 'score_chart.dart';
 import 'settings_page.dart';
 
@@ -100,12 +102,16 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   // Everything the engine says, shown verbatim in the Raw tab.
   final _engineLog = EngineLog();
 
-  // Move history: list of positions from the starting position onward.
-  // _historyIndex points to the currently displayed position.
-  List<Position> _history = [];
-  int _historyIndex = 0;
+  // The game being studied and the node currently on the board. Every line
+  // ever played is kept, so stepping back and playing something else records a
+  // variation rather than discarding what was there.
+  late Game _game;
+  late GameNode _current;
 
-  Position get _position => _history[_historyIndex];
+  Position get _position => _current.position;
+
+  /// Root-first nodes leading to the position on the board.
+  List<GameNode> get _path => _current.pathFromRoot;
 
   int? _selectedSquare;
   bool _isAnalyzing = false;
@@ -139,24 +145,18 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   /// Score of every position in the game so far, in play order; null where a
   /// position has not been analysed.
   List<int?> get _scoreByPly => [
-    for (final position in _history) _evalByFen[position.toFen()]?.cp,
+    for (final node in _path) _evalByFen[node.position.toFen()]?.cp,
   ];
 
   /// Name for each ply, e.g. "3. 炮二平五" — used by the chart's hover readout.
-  List<String> get _plyLabels {
-    final labels = <String>['Start'];
-    for (var i = 1; i < _history.length; i++) {
-      final before = _history[i - 1];
-      final uci = MoveNotation.uciBetween(before, _history[i]);
-      final notation = uci == null
-          ? '??'
-          : MoveNotation.toNotation(uci, before, widget.settings.language);
-      final moveNumber = (i - 1) ~/ 2 + 1;
-      final isRedPly = (i - 1) % 2 == 0;
-      labels.add('$moveNumber${isRedPly ? '.' : '...'} $notation');
-    }
-    return labels;
-  }
+  List<String> get _plyLabels => [
+    for (final node in _path)
+      if (node.move == null || node.parent == null)
+        'Start'
+      else
+        '${node.moveNumber}${node.isRedMove ? '.' : '...'} '
+            '${MoveNotation.toNotation(node.move!, node.parent!.position, widget.settings.language)}',
+  ];
 
   /// Rows for the analysis table: current-position lines (deepest on top)
   /// first, then any stale previous-position lines.
@@ -289,9 +289,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   @override
   void initState() {
     super.initState();
-    _history = [Position.startPosition()];
-    _historyIndex = 0;
-    _fenController.text = _position.toFen();
+    _loadGame(Game.fromPosition(Position.startPosition()));
     _initEngine();
   }
 
@@ -391,22 +389,11 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       return false;
     }
 
-    final newPos = _position
-        .withPiece(from, null)
-        .withPiece(to, piece)
-        .withSideToMove(
-          _position.sideToMove == PieceColor.red
-              ? PieceColor.black
-              : PieceColor.red,
-        );
-
-    // Truncate future history if we're not at the end
-    if (_historyIndex < _history.length - 1) {
-      _history = _history.sublist(0, _historyIndex + 1);
-    }
-
-    _history.add(newPos);
-    _historyIndex = _history.length - 1;
+    // Recording rather than truncating: a different move here becomes a
+    // variation, and replaying a known move just walks back into it.
+    final uci = '${Position.squareToUci(from)}${Position.squareToUci(to)}';
+    _current = _current.addMove(uci);
+    final newPos = _current.position;
     _fenController.text = newPos.toFen();
     _lastMoveFrom = from;
     _lastMoveTo = to;
@@ -435,13 +422,13 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     return true;
   }
 
-  bool get _canGoBack => _historyIndex > 0;
-  bool get _canGoForward => _historyIndex < _history.length - 1;
+  bool get _canGoBack => _current.parent != null;
+  bool get _canGoForward => _current.children.isNotEmpty;
 
   void _goBack() {
     if (!_canGoBack) return;
     setState(() {
-      _historyIndex--;
+      _current = _current.parent!;
       _fenController.text = _position.toFen();
       _selectedSquare = null;
       _updateLastMoveHighlight();
@@ -452,7 +439,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   void _goForward() {
     if (!_canGoForward) return;
     setState(() {
-      _historyIndex++;
+      _current = _current.children.first;
       _fenController.text = _position.toFen();
       _selectedSquare = null;
       _updateLastMoveHighlight();
@@ -461,9 +448,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   }
 
   void _goToStart() {
-    if (_historyIndex == 0) return;
+    if (_current.isRoot) return;
     setState(() {
-      _historyIndex = 0;
+      _current = _game.root;
       _fenController.text = _position.toFen();
       _selectedSquare = null;
       _lastMoveFrom = null;
@@ -473,9 +460,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   }
 
   void _goToEnd() {
-    if (_historyIndex == _history.length - 1) return;
+    if (_current.children.isEmpty) return;
     setState(() {
-      _historyIndex = _history.length - 1;
+      _current = _current.mainlineEnd;
       _fenController.text = _position.toFen();
       _selectedSquare = null;
       _updateLastMoveHighlight();
@@ -496,11 +483,11 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     });
   }
 
-  /// Jump to a specific position in the move history.
-  void _goToIndex(int index) {
-    if (index < 0 || index >= _history.length || index == _historyIndex) return;
+  /// Show [node] on the board.
+  void _goToNode(GameNode node) {
+    if (identical(node, _current)) return;
     setState(() {
-      _historyIndex = index;
+      _current = node;
       _fenController.text = _position.toFen();
       _selectedSquare = null;
       _updateLastMoveHighlight();
@@ -508,31 +495,35 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     });
   }
 
-  /// Reconstruct last-move highlight by comparing current and previous positions.
+  /// Jump to a ply on the current line, used by the score chart.
+  void _goToPly(int ply) {
+    final path = _path;
+    if (ply < 0 || ply >= path.length) return;
+    _goToNode(path[ply]);
+  }
+
+  /// Drop [node] and everything after it, falling back to its parent.
+  void _deleteNode(GameNode node) {
+    if (node.isRoot) return;
+    final parent = node.parent!;
+    setState(() {
+      if (_path.contains(node)) _current = parent;
+      node.remove();
+      _updateLastMoveHighlight();
+      _restartAnalysisIfNeeded();
+    });
+  }
+
+  /// Make [node] the main line at its branch point.
+  void _promoteNode(GameNode node) {
+    setState(() => node.promote());
+  }
+
+  /// Highlight the move that led to the node on the board.
   void _updateLastMoveHighlight() {
-    if (_historyIndex == 0) {
-      _lastMoveFrom = null;
-      _lastMoveTo = null;
-      return;
-    }
-    // Find the squares that differ between previous and current position
-    final prev = _history[_historyIndex - 1];
-    final curr = _history[_historyIndex];
-    int? from;
-    int? to;
-    for (int sq = 0; sq < Position.squareCount; sq++) {
-      final prevP = prev.pieceAt(sq);
-      final currP = curr.pieceAt(sq);
-      if (prevP != currP) {
-        if (prevP != null && currP == null) {
-          from = sq; // piece left this square
-        } else if (currP != null && (prevP == null || prevP != currP)) {
-          to = sq; // piece arrived at this square
-        }
-      }
-    }
-    _lastMoveFrom = from;
-    _lastMoveTo = to;
+    final move = _current.move;
+    _lastMoveFrom = _uciSquare(move, 0);
+    _lastMoveTo = _uciSquare(move, 2);
   }
 
   /// If analyzing, restart analysis on the current position.
@@ -572,9 +563,28 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     });
   }
 
-  /// Replace the current position in history (for setup mode edits).
+  /// Setup edits rewrite the position itself, so the edited board becomes the
+  /// new starting point; any moves recorded from the old one are dropped.
   void _replaceCurrentPosition(Position pos) {
-    _history[_historyIndex] = pos;
+    _loadGame(Game.fromPosition(pos, metadata: _game.metadata));
+  }
+
+  /// Show [game] from its root, clearing everything tied to the old one.
+  void _loadGame(Game game) {
+    _game = game;
+    _current = game.root;
+    _fenController.text = _position.toFen();
+    _selectedSquare = null;
+    _latestBestMove = null;
+    _curByDepth.clear();
+    _staleLines = [];
+    // A different game means a different graph.
+    _evalByFen.clear();
+    _enginePosition = null;
+    _bestUci = null;
+    _ponderUci = null;
+    _lastMoveFrom = null;
+    _lastMoveTo = null;
   }
 
   void _showPiecePicker(int square) {
@@ -687,42 +697,12 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
   void _resetPosition() {
     if (_isAnalyzing) _stopAnalysis();
-    setState(() {
-      _history = [Position.startPosition()];
-      _historyIndex = 0;
-      _fenController.text = _position.toFen();
-      _selectedSquare = null;
-      _latestBestMove = null;
-      _curByDepth.clear();
-      _staleLines = [];
-      // A different game means a different graph.
-      _evalByFen.clear();
-      _enginePosition = null;
-      _bestUci = null;
-      _ponderUci = null;
-      _lastMoveFrom = null;
-      _lastMoveTo = null;
-    });
+    setState(() => _loadGame(Game.fromPosition(Position.startPosition())));
   }
 
   void _clearBoard() {
     if (_isAnalyzing) _stopAnalysis();
-    setState(() {
-      _history = [Position.empty()];
-      _historyIndex = 0;
-      _fenController.text = _position.toFen();
-      _selectedSquare = null;
-      _latestBestMove = null;
-      _curByDepth.clear();
-      _staleLines = [];
-      // A different game means a different graph.
-      _evalByFen.clear();
-      _enginePosition = null;
-      _bestUci = null;
-      _ponderUci = null;
-      _lastMoveFrom = null;
-      _lastMoveTo = null;
-    });
+    setState(() => _loadGame(Game.fromPosition(Position.empty())));
   }
 
   void _applyFen() {
@@ -730,21 +710,10 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     final fen = _fenController.text.trim();
     if (fen.isEmpty) return;
     try {
-      setState(() {
-        _history = [Position.fromFen(fen)];
-        _historyIndex = 0;
-        _selectedSquare = null;
-        _latestBestMove = null;
-        _curByDepth.clear();
-        _staleLines = [];
-        // A different game means a different graph.
-        _evalByFen.clear();
-        _enginePosition = null;
-        _bestUci = null;
-        _ponderUci = null;
-        _lastMoveFrom = null;
-        _lastMoveTo = null;
-      });
+      final position = Position.fromFen(fen);
+      setState(
+        () => _loadGame(Game.fromPosition(position, metadata: _game.metadata)),
+      );
     } catch (e) {
       ScaffoldMessenger.of(
         context,
@@ -758,19 +727,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   /// dropped and stale engine output cleared; a running search restarts on it.
   void _transformPosition(Position Function(Position) transform) {
     setState(() {
-      final next = transform(_position);
-      _history = [next];
-      _historyIndex = 0;
-      _fenController.text = next.toFen();
-      _selectedSquare = null;
-      _latestBestMove = null;
-      _curByDepth.clear();
-      _staleLines = [];
-      // A different game means a different graph.
-      _evalByFen.clear();
-      _enginePosition = null;
-      _lastMoveFrom = null;
-      _lastMoveTo = null;
+      _loadGame(
+        Game.fromPosition(transform(_position), metadata: _game.metadata),
+      );
       _restartAnalysisIfNeeded();
     });
   }
@@ -899,7 +858,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: Text(
-                          '${_historyIndex}/${_history.length - 1}',
+                          '${_current.ply}/${_current.mainlineEnd.ply}',
                           style: const TextStyle(
                             fontSize: 13,
                             color: Colors.grey,
@@ -1052,29 +1011,34 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                 const Divider(height: 1),
 
                 // Move list (only once moves have been played)
-                if (_history.length > 1)
+                if (_game.root.children.isNotEmpty)
                   ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxHeight: textScaler.scale(64),
+                      maxHeight: textScaler.scale(96),
                     ),
-                    child: MoveList(
-                      history: _history,
-                      currentIndex: _historyIndex,
-                      language: widget.settings.language,
-                      onSelect: _goToIndex,
+                    child: MoveTree(
+                      game: _game,
+                      current: _current,
+                      language: settings.language,
+                      onSelect: _goToNode,
+                      onDelete: _deleteNode,
+                      onPromote: _promoteNode,
                     ),
                   ),
-                if (_history.length > 1) const Divider(height: 1),
+                if (_game.root.children.isNotEmpty) const Divider(height: 1),
 
                 // Engine analysis and cloud candidates in separate tabs
                 Expanded(
                   child: DefaultTabController(
-                    length: 4,
+                    length: 5,
                     child: Column(
                       children: [
                         const TabBar(
+                          isScrollable: true,
+                          tabAlignment: TabAlignment.center,
                           tabs: [
                             Tab(text: 'Engine'),
+                            Tab(text: 'Notes'),
                             Tab(text: 'Cloud'),
                             Tab(text: 'Raw'),
                             Tab(text: 'Score'),
@@ -1102,6 +1066,12 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                                 language: settings.language,
                                 scorePerspective: settings.scorePerspective,
                               ),
+                              NotesPanel(
+                                node: _current,
+                                language: settings.language,
+                                onChanged: (text) =>
+                                    setState(() => _current.comment = text),
+                              ),
                               SingleChildScrollView(
                                 child: CandidateMoves(
                                   position: _position,
@@ -1115,8 +1085,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                               ScoreChart(
                                 centipawns: _scoreByPly,
                                 plyLabels: _plyLabels,
-                                currentPly: _historyIndex,
-                                onSelect: _goToIndex,
+                                currentPly: _current.ply,
+                                onSelect: _goToPly,
                               ),
                             ],
                           ),
