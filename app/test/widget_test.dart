@@ -70,6 +70,64 @@ void main() {
     });
   });
 
+  group('Stacked pieces', () {
+    /// A board holding [count] pieces of one type stacked on file e.
+    Position stack(PieceColor colour, PieceType type, List<String> squares) {
+      var pos = Position.empty().withSideToMove(colour);
+      for (final square in squares) {
+        pos = pos.withPiece(Position.uciToSquare(square)!, Piece(colour, type));
+      }
+      return pos;
+    }
+
+    String notate(Position pos, String uci, [DisplayLanguage? lang]) =>
+        MoveNotation.toNotation(uci, pos, lang ?? DisplayLanguage.simplified);
+
+    test('the front/back marker comes before the piece', () {
+      // Two black pawns on file e: e5 is the front one, e6 behind it.
+      final pawns = stack(PieceColor.black, PieceType.pawn, ['e5', 'e6']);
+      expect(notate(pawns, 'e5e4'), '前卒进1');
+      expect(notate(pawns, 'e6e5'), '后卒进1');
+
+      // And for Red, whose front is up the board.
+      final rooks = stack(PieceColor.red, PieceType.rook, ['c3', 'c5']);
+      expect(notate(rooks, 'c5c6'), '前车进一');
+      expect(notate(rooks, 'c3c4'), '后车进一');
+      expect(notate(rooks, 'c5d5'), '前车平六');
+    });
+
+    test('three on a file read front, middle, back', () {
+      final pawns = stack(PieceColor.red, PieceType.pawn, ['e3', 'e4', 'e5']);
+      expect(notate(pawns, 'e5e6'), '前兵进一');
+      expect(notate(pawns, 'e4e5'), '中兵进一');
+      expect(notate(pawns, 'e3e4'), '后兵进一');
+    });
+
+    test('four or more are counted from the front', () {
+      final pawns = stack(PieceColor.red, PieceType.pawn, [
+        'e2',
+        'e3',
+        'e4',
+        'e5',
+      ]);
+      expect(notate(pawns, 'e5e6'), '一兵进一');
+      expect(notate(pawns, 'e4e5'), '二兵进一');
+      expect(notate(pawns, 'e3e4'), '三兵进一');
+      expect(notate(pawns, 'e2e3'), '四兵进一');
+    });
+
+    test('traditional Chinese uses 後', () {
+      final rooks = stack(PieceColor.red, PieceType.rook, ['c3', 'c5']);
+      expect(notate(rooks, 'c3c4', DisplayLanguage.traditional), '後車進一');
+    });
+
+    test('a lone piece is still named by its file', () {
+      final rook = stack(PieceColor.red, PieceType.rook, ['c3']);
+      expect(notate(rook, 'c3c4'), '车七进一');
+      expect(notate(rook, 'c3d3'), '车七平六');
+    });
+  });
+
   group('Display language', () {
     test('piece labels vary by language', () {
       const knight = Piece(PieceColor.red, PieceType.knight);
@@ -619,7 +677,7 @@ void main() {
 
   group('Score chart', () {
     /// Chart points for a line of scores, with optional labels and moves.
-    List<ScorePoint> _points(
+    List<ScorePoint> points(
       List<int?> scores, {
       List<String> labels = const [],
       List<String?> best = const [],
@@ -679,7 +737,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: ScoreChart(points: _points([null, null]), currentPly: 0),
+            body: ScoreChart(points: points([null, null]), currentPly: 0),
           ),
         ),
       );
@@ -691,7 +749,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ScoreChart(
-              points: _points([20, null, -140, 65]),
+              points: points([20, null, -140, 65]),
               currentPly: 2,
             ),
           ),
@@ -728,7 +786,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ScoreChart(
-              points: _points(
+              points: points(
                 [10, -25, 340],
                 labels: ['Start', '1. 炮二平五', '1... 马8进7'],
               ),
@@ -771,7 +829,7 @@ void main() {
             body: SizedBox(
               height: 320,
               child: ScoreChart(
-                points: _points(
+                points: points(
                   [40, -60, 20],
                   labels: ['Start', '1. 炮二平五', '1... 马8进7'],
                   best: ['h2e2', 'b9c7', null],
@@ -819,7 +877,7 @@ void main() {
                 width: 200,
                 height: 110,
                 child: ScoreChart(
-                  points: _points([40, -60], best: ['h2e2', null]),
+                  points: points([40, -60], best: ['h2e2', null]),
                   currentPly: 0,
                 ),
               ),
@@ -857,7 +915,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ScoreChart(
-              points: _points([null, null, null]),
+              points: points([null, null, null]),
               currentPly: 0,
               onAnalyseGame: () => started++,
               onCancelAnalysis: () => cancelled++,
@@ -877,7 +935,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ScoreChart(
-              points: _points([12, null, null]),
+              points: points([12, null, null]),
               currentPly: 0,
               onAnalyseGame: () => started++,
               onCancelAnalysis: () => cancelled++,
@@ -900,7 +958,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: ScoreChart(
-              points: _points([0, 50, 100, 150, 200]),
+              points: points([0, 50, 100, 150, 200]),
               currentPly: 0,
               onSelect: (ply) => selected = ply,
             ),

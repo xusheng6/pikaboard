@@ -13,7 +13,8 @@ import 'settings.dart';
 /// - For vertical/diagonal moves, destination is the number of steps
 ///   (for Rook/Cannon/Pawn/King) or the target file (for Knight/Bishop/Advisor).
 ///
-/// When two identical pieces share the same file, 前/後 replaces the file number.
+/// When identical pieces share a file, a 前/後 marker replaces the file number
+/// and precedes the piece: 前卒进1.
 class MoveNotation {
   static const _redNumerals = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
   static const _blackNumerals = [
@@ -62,38 +63,36 @@ class MoveNotation {
     int fileToNum(int file) => isRed ? (9 - file) : (file + 1);
 
     // Piece character
-    String pieceName = piece.labelFor(lang);
+    final String pieceName = piece.labelFor(lang);
 
-    // Check for duplicate pieces of same type and color on the same file
-    String fileOrPosition = numerals[fileToNum(fromFile)];
+    // A piece is normally named by its file — 车二, 卒5. When identical pieces
+    // share a file that is ambiguous, so it is named by where it stands in the
+    // stack instead, and that marker goes *before* the piece: 前卒进1, not
+    // 卒前进1.
+    String stackMarker = '';
+    String fileName = numerals[fileToNum(fromFile)];
     if (_hasDuplicateOnSameFile(position, piece, fromFile)) {
-      // Determine 前(front) or 後(back)
+      fileName = '';
       // "Front" means closer to the opponent. For Red, higher rank = front.
       // For Black, lower rank = front.
       final others = _findSameTypeOnFile(position, piece, fromFile);
       if (others.length == 2) {
-        // Simple case: 2 pieces, use 前/後
         final otherRank =
             others.firstWhere((sq) => sq != from) ~/ Position.files;
         final isFront = isRed ? (fromRank > otherRank) : (fromRank < otherRank);
-        fileOrPosition = isFront ? '前' : back;
+        stackMarker = isFront ? '前' : back;
       } else {
-        // 3+ identical pieces on the same file (e.g., 3 pawns)
-        // Sort by rank: for Red, highest rank first (front); for Black, lowest rank first
+        // Three or more on one file: front to back.
         others.sort((a, b) {
           final ra = a ~/ Position.files;
           final rb = b ~/ Position.files;
           return isRed ? rb.compareTo(ra) : ra.compareTo(rb);
         });
         final index = others.indexOf(from);
-        if (others.length == 3) {
-          fileOrPosition = ['前', '中', back][index];
-        } else {
-          // For 4-5 pawns, use ordinal numbers
-          fileOrPosition = numerals[index + 1];
-          // Replace piece name with file indicator
-          pieceName = piece.labelFor(lang);
-        }
+        stackMarker = others.length == 3
+            ? ['前', '中', back][index]
+            // Four or five pawns are counted from the front instead.
+            : numerals[index + 1];
       }
     }
 
@@ -123,7 +122,7 @@ class MoveNotation {
       }
     }
 
-    return '$pieceName$fileOrPosition$action$destination';
+    return '$stackMarker$pieceName$fileName$action$destination';
   }
 
   /// Convert a PV string (space-separated UCI moves) to notation for [lang].
