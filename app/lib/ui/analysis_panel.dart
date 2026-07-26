@@ -27,7 +27,7 @@ import '../models/settings.dart';
 }
 
 // Shared column widths so the header and every row line up.
-const double _kDepthWidth = 34;
+const double _kDepthWidth = 46;
 const double _kScoreWidth = 64;
 const double _kTimeWidth = 54;
 const double _kColumnGap = 8;
@@ -180,7 +180,14 @@ class _HeaderRow extends StatelessWidget {
       children: const [
         SizedBox(
           width: _kDepthWidth,
-          child: Text('Depth', style: style, textAlign: TextAlign.right),
+          child: Text(
+            'Depth',
+            style: style,
+            textAlign: TextAlign.right,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.clip,
+          ),
         ),
         SizedBox(width: _kColumnGap),
         SizedBox(
