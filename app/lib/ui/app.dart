@@ -298,16 +298,51 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   int? get _ponderMoveFrom => _uciSquare(_ponderUci, 0);
   int? get _ponderMoveTo => _uciSquare(_ponderUci, 2);
 
-  /// The engine's line as numbered board arrows: "1" is the move it wants to
-  /// play now, "2" the reply it expects. Each is drawn in the colour of the
-  /// side playing it, and either can be switched off in settings.
+  /// The engine's current candidates, best first: the deepest line reported
+  /// for each MultiPV rank.
+  List<SearchInfo> get _candidateLines {
+    final byRank = <int, SearchInfo>{};
+    for (final info in _curLines.values) {
+      if (info.pv.isEmpty) continue;
+      final best = byRank[info.multiPV];
+      if (best == null || info.depth > best.depth) byRank[info.multiPV] = info;
+    }
+    final ranks = byRank.keys.toList()..sort();
+    return [for (final rank in ranks) byRank[rank]!];
+  }
+
+  /// What the board draws over the pieces.
+  ///
+  /// Searching a single line, that is the move to play and the reply expected
+  /// after it. Asked for several lines, the reply matters less than the
+  /// alternatives, so each candidate is drawn instead — numbered by rank, with
+  /// everything behind the engine's choice drawn back.
   List<BoardArrow> get _boardArrows {
+    final settings = widget.settings;
     final sideToMove = (_enginePosition ?? _position).sideToMove;
+
+    if (settings.multiPv > 1) {
+      if (!settings.highlightBestMove) return const [];
+      final candidates = _candidateLines;
+      return [
+        for (var i = 0; i < candidates.length; i++)
+          if (_uciSquare(candidates[i].pv.first, 0) != null &&
+              _uciSquare(candidates[i].pv.first, 2) != null)
+            BoardArrow(
+              from: _uciSquare(candidates[i].pv.first, 0)!,
+              to: _uciSquare(candidates[i].pv.first, 2)!,
+              side: sideToMove,
+              label: '${i + 1}',
+              strength: i == 0 ? 1 : 0.5,
+            ),
+      ];
+    }
+
     final opponent = sideToMove == PieceColor.red
         ? PieceColor.black
         : PieceColor.red;
     return [
-      if (widget.settings.highlightBestMove &&
+      if (settings.highlightBestMove &&
           _bestMoveFrom != null &&
           _bestMoveTo != null)
         BoardArrow(
@@ -316,7 +351,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
           side: sideToMove,
           label: '1',
         ),
-      if (widget.settings.highlightPonderMove &&
+      if (settings.highlightPonderMove &&
           _ponderMoveFrom != null &&
           _ponderMoveTo != null)
         BoardArrow(
@@ -421,8 +456,14 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     super.didUpdateWidget(oldWidget);
     // A new line count only reaches the engine between searches, so restart
     // one that is already running.
-    if (oldWidget.settings.multiPv != widget.settings.multiPv && _isAnalyzing) {
-      _restartSearch(_position);
+    if (oldWidget.settings.multiPv != widget.settings.multiPv) {
+      // Rows from the old count describe a different search; keeping them
+      // would leave the rank column behind after going back to one line.
+      setState(() {
+        _curLines.clear();
+        _staleLines = [];
+      });
+      if (_isAnalyzing) _restartSearch(_position);
     }
   }
 

@@ -15,11 +15,16 @@ class BoardArrow {
   final PieceColor side;
   final String label;
 
+  /// How strongly to draw it, 1 for the engine's choice and less for the
+  /// alternatives behind it.
+  final double strength;
+
   const BoardArrow({
     required this.from,
     required this.to,
     required this.side,
     required this.label,
+    this.strength = 1,
   });
 
   @override
@@ -28,10 +33,11 @@ class BoardArrow {
       other.from == from &&
       other.to == to &&
       other.side == side &&
-      other.label == label;
+      other.label == label &&
+      other.strength == strength;
 
   @override
-  int get hashCode => Object.hash(from, to, side, label);
+  int get hashCode => Object.hash(from, to, side, label, strength);
 }
 
 class BoardWidget extends StatelessWidget {
@@ -214,8 +220,8 @@ class _ArrowPainter extends CustomPainter {
       );
       final dotCenter = to - unit * (cellW * 0.4 * duplicates);
 
-      _drawArrow(canvas, from, dotCenter, unit, color, cellW);
-      _drawDot(canvas, dotCenter, color, cellW, arrow.label);
+      _drawArrow(canvas, from, dotCenter, unit, color, cellW, arrow.strength);
+      _drawDot(canvas, dotCenter, color, cellW, arrow.label, arrow.strength);
     }
   }
 
@@ -234,17 +240,18 @@ class _ArrowPainter extends CustomPainter {
     Offset unit,
     Color color,
     double cellW,
+    double strength,
   ) {
     // Start clear of the moving piece and stop at the edge of the dot.
     final start = from + unit * (cellW * 0.36);
     final end = to - unit * (cellW * 0.2);
     if ((end - start).dx * unit.dx + (end - start).dy * unit.dy <= 0) return;
 
-    final headLength = cellW * 0.24;
+    final headLength = cellW * 0.24 * (0.7 + 0.3 * strength);
     final headBase = end - unit * headLength;
     final paint = Paint()
-      ..color = color.withValues(alpha: 0.85)
-      ..strokeWidth = cellW * 0.07
+      ..color = color.withValues(alpha: 0.85 * strength)
+      ..strokeWidth = cellW * 0.07 * (0.6 + 0.4 * strength)
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
     canvas.drawLine(start, headBase, paint);
@@ -255,7 +262,10 @@ class _ArrowPainter extends CustomPainter {
       ..lineTo(headBase.dx + perpendicular.dx, headBase.dy + perpendicular.dy)
       ..lineTo(headBase.dx - perpendicular.dx, headBase.dy - perpendicular.dy)
       ..close();
-    canvas.drawPath(head, Paint()..color = color.withValues(alpha: 0.85));
+    canvas.drawPath(
+      head,
+      Paint()..color = color.withValues(alpha: 0.85 * strength),
+    );
   }
 
   void _drawDot(
@@ -264,9 +274,14 @@ class _ArrowPainter extends CustomPainter {
     Color color,
     double cellW,
     String label,
+    double strength,
   ) {
-    final radius = cellW * 0.18;
-    canvas.drawCircle(center, radius, Paint()..color = color);
+    final radius = cellW * 0.18 * (0.8 + 0.2 * strength);
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()..color = color.withValues(alpha: 0.55 + 0.45 * strength),
+    );
     canvas.drawCircle(
       center,
       radius,

@@ -92,6 +92,17 @@ class AnalysisPanel extends StatelessWidget {
   /// True when the engine is reporting alternatives, so rows need numbering.
   bool get showsRank => lines.any((line) => line.info.multiPV > 1);
 
+  /// The deepest iteration reported for the position on the board. Rows from
+  /// it are the engine's current word; earlier ones are drawn back so the
+  /// latest lines stand out among their own history.
+  int get _latestDepth {
+    var deepest = 0;
+    for (final line in lines) {
+      if (!line.stale && line.info.depth > deepest) deepest = line.info.depth;
+    }
+    return deepest;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (lines.isEmpty && bestMove == null) {
@@ -127,6 +138,7 @@ class AnalysisPanel extends StatelessWidget {
                       showPreview: showPreview,
                       viewFromBlack: viewFromBlack,
                       showRank: showsRank,
+                      superseded: !line.stale && line.info.depth < _latestDepth,
                     ),
                 ],
               ],
@@ -273,6 +285,9 @@ class _LineRow extends StatelessWidget {
   final bool viewFromBlack;
   final bool showRank;
 
+  /// A line from an earlier iteration of the current search.
+  final bool superseded;
+
   const _LineRow({
     required this.line,
     required this.language,
@@ -280,6 +295,7 @@ class _LineRow extends StatelessWidget {
     this.showPreview = true,
     this.viewFromBlack = false,
     this.showRank = false,
+    this.superseded = false,
   });
 
   @override
@@ -375,8 +391,10 @@ class _LineRow extends StatelessWidget {
       ),
     );
 
-    // Grey out lines that belong to a previous board position.
-    return line.stale ? Opacity(opacity: 0.4, child: row) : row;
+    // Lines for an old position fade hardest; earlier iterations of the
+    // current search sit between them and the latest word.
+    if (line.stale) return Opacity(opacity: 0.4, child: row);
+    return superseded ? Opacity(opacity: 0.55, child: row) : row;
   }
 }
 

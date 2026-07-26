@@ -317,6 +317,54 @@ void main() {
       );
     });
 
+    testWidgets('only the latest iteration is drawn at full strength', (
+      tester,
+    ) async {
+      final start = Position.startPosition();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AnalysisPanel(
+              lines: [
+                // Latest word ...
+                AnalysisLine(
+                  info: _line(14, pv: 'h2e2'),
+                  position: start,
+                ),
+                // ... an earlier iteration of the same search ...
+                AnalysisLine(
+                  info: _line(13, pv: 'h2e2'),
+                  position: start,
+                ),
+                // ... and a line for a position already left behind.
+                AnalysisLine(
+                  info: _line(20, pv: 'b0c2'),
+                  position: start,
+                  stale: true,
+                ),
+              ],
+              position: start,
+              showPreview: false,
+            ),
+          ),
+        ),
+      );
+
+      double opacityAround(String text) {
+        final finder = find.ancestor(
+          of: find.text(text),
+          matching: find.byType(Opacity),
+        );
+        return finder.evaluate().isEmpty
+            ? 1
+            : tester.widget<Opacity>(finder.first).opacity;
+      }
+
+      expect(opacityAround('14'), 1, reason: 'the latest lines are solid');
+      expect(opacityAround('13'), lessThan(1));
+      expect(opacityAround('13'), greaterThan(opacityAround('20')));
+    });
+
     testWidgets('a single-line search has no rank column', (tester) async {
       final start = Position.startPosition();
       await tester.pumpWidget(
