@@ -252,7 +252,7 @@ class _BoardPainter extends CustomPainter {
     // River text
     final riverPaint = TextPainter(
       text: TextSpan(
-        text: '楚  河          漢  界',
+        text: '楚  河          汉  界',
         style: TextStyle(
           fontSize: cellH * 0.45,
           color: Colors.black54,

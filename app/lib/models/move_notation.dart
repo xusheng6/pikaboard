@@ -1,13 +1,13 @@
 import 'piece.dart';
 import 'position.dart';
 
-/// Converts UCI moves to traditional Chinese Xiangqi notation.
+/// Converts UCI moves to simplified Chinese Xiangqi notation.
 ///
 /// Red files are numbered 1-9 right-to-left (file i=1, file a=9) using 一二三四五六七八九.
 /// Black files are numbered 1-9 right-to-left (file i=1, file a=9) using 1-9.
 ///
 /// Format: [Piece][File] [Action][Destination]
-/// - Action: 進 (advance), 退 (retreat), 平 (horizontal)
+/// - Action: 进 (advance), 退 (retreat), 平 (horizontal)
 /// - For horizontal moves, destination is the target file number.
 /// - For vertical/diagonal moves, destination is the number of steps
 ///   (for Rook/Cannon/Pawn/King) or the target file (for Knight/Bishop/Advisor).
@@ -55,7 +55,7 @@ class MoveNotation {
         // Simple case: 2 pieces, use 前/後
         final otherRank = others.firstWhere((sq) => sq != from) ~/ Position.files;
         final isFront = isRed ? (fromRank > otherRank) : (fromRank < otherRank);
-        fileOrPosition = isFront ? '前' : '後';
+        fileOrPosition = isFront ? '前' : '后';
       } else {
         // 3+ identical pieces on the same file (e.g., 3 pawns)
         // Sort by rank: for Red, highest rank first (front); for Black, lowest rank first
@@ -66,7 +66,7 @@ class MoveNotation {
         });
         final index = others.indexOf(from);
         if (others.length == 3) {
-          fileOrPosition = ['前', '中', '後'][index];
+          fileOrPosition = ['前', '中', '后'][index];
         } else {
           // For 4-5 pawns, use ordinal numbers
           fileOrPosition = numerals[index + 1];
@@ -87,7 +87,7 @@ class MoveNotation {
     } else {
       // Vertical or diagonal move
       final isAdvance = isRed ? (toRank > fromRank) : (toRank < fromRank);
-      action = isAdvance ? '進' : '退';
+      action = isAdvance ? '进' : '退';
 
       // For pieces that move diagonally (Knight, Bishop, Advisor),
       // destination is the target file number.

@@ -12,34 +12,34 @@ class Piece {
     if (color == PieceColor.red) {
       switch (type) {
         case PieceType.king:
-          return '帥';
+          return '帅';
         case PieceType.advisor:
           return '仕';
         case PieceType.bishop:
           return '相';
         case PieceType.knight:
-          return '馬';
+          return '马';
         case PieceType.rook:
-          return '車';
+          return '车';
         case PieceType.cannon:
-          return '砲';
+          return '炮';
         case PieceType.pawn:
           return '兵';
       }
     } else {
       switch (type) {
         case PieceType.king:
-          return '將';
+          return '将';
         case PieceType.advisor:
           return '士';
         case PieceType.bishop:
           return '象';
         case PieceType.knight:
-          return '馬';
+          return '马';
         case PieceType.rook:
-          return '車';
+          return '车';
         case PieceType.cannon:
-          return '砲';
+          return '炮';
         case PieceType.pawn:
           return '卒';
       }

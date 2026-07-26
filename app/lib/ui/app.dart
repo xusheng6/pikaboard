@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../engine/pikafish_engine.dart';
 import '../engine/search_info.dart';
@@ -49,12 +50,63 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   bool _isSetupMode = false;
   PieceColor _setupColor = PieceColor.red;
 
-  // The position that was sent to the engine for analysis.
-  // Used for Chinese notation display (stays stable during analysis).
-  Position? _analysisPosition;
-
-  SearchInfo? _latestInfo;
   BestMove? _latestBestMove;
+
+  // The position the engine is currently searching. Search output is tied to
+  // this so its moves render in the right notation and so lines can be marked
+  // stale once the board moves on.
+  Position? _enginePosition;
+
+  // Current search lines, keyed by depth so each iteration collapses to one
+  // row (latest update per depth wins).
+  final Map<int, SearchInfo> _curByDepth = {};
+
+  // Lines from the previous searched position, shown greyed below the current
+  // ones until the next hard reset.
+  List<AnalysisLine> _staleLines = [];
+
+  /// Rows for the analysis table: current-position lines (deepest on top)
+  /// first, then any stale previous-position lines.
+  List<AnalysisLine> get _analysisLines {
+    final enginePos = _enginePosition;
+    // If the board has moved on without a running search, the current lines
+    // describe a previous position too.
+    final curStale =
+        enginePos == null || enginePos.toFen() != _position.toFen();
+    final cur =
+        (_curByDepth.values.toList()
+              ..sort((a, b) => b.depth.compareTo(a.depth)))
+            .map(
+              (info) => AnalysisLine(
+                info: info,
+                position: enginePos ?? _position,
+                stale: curStale,
+              ),
+            );
+    return [...cur, ..._staleLines];
+  }
+
+  /// Send [pos] to the engine and start an infinite search, demoting the
+  /// previous search's lines to the greyed stale list.
+  void _startEngineSearch(Position pos) {
+    if (_curByDepth.isNotEmpty && _enginePosition != null) {
+      _staleLines =
+          _curByDepth.values
+              .map(
+                (info) => AnalysisLine(
+                  info: info,
+                  position: _enginePosition!,
+                  stale: true,
+                ),
+              )
+              .toList()
+            ..sort((a, b) => b.info.depth.compareTo(a.info.depth));
+    }
+    _curByDepth.clear();
+    _enginePosition = pos;
+    _engine.setPosition(pos.toFen());
+    _engine.goInfinite();
+  }
 
   StreamSubscription<SearchInfo>? _infoSub;
   StreamSubscription<BestMove>? _bestMoveSub;
@@ -80,8 +132,11 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     try {
       await _engine.init();
       _infoSub = _engine.searchInfo.listen((info) {
+        // Drop trailing output from a search that was stopped for a restart,
+        // so old high-depth lines don't leak into the new position's table.
+        if (_restartPending) return;
         setState(() {
-          _latestInfo = info;
+          if (info.pv.isNotEmpty) _curByDepth[info.depth] = info;
           // Highlight best move from PV
           if (info.pv.isNotEmpty) {
             final move = info.pv.first;
@@ -177,20 +232,21 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     _lastMoveFrom = from;
     _lastMoveTo = to;
 
-    // If engine is analyzing, restart analysis on the new position
+    // If engine is analyzing, restart analysis on the new position. The old
+    // lines stay visible (greyed, since the board no longer matches the engine
+    // position) until the new search demotes them to the stale list.
     if (_isAnalyzing) {
-      _latestInfo = null;
       _latestBestMove = null;
       _bestMoveFrom = null;
       _bestMoveTo = null;
-      _analysisPosition = newPos;
       _restartPending = true;
       _engine.stop();
       Future.delayed(const Duration(milliseconds: 100), () {
         if (mounted) {
-          _restartPending = false;
-          _engine.setPosition(newPos.toFen());
-          _engine.goInfinite();
+          setState(() {
+            _restartPending = false;
+            _startEngineSearch(newPos);
+          });
         }
       });
     } else {
@@ -281,19 +337,18 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _bestMoveTo = null;
       return;
     }
-    _latestInfo = null;
     _latestBestMove = null;
     _bestMoveFrom = null;
     _bestMoveTo = null;
-    _analysisPosition = _position;
     _restartPending = true;
     _engine.stop();
-    final fen = _position.toFen();
+    final target = _position;
     Future.delayed(const Duration(milliseconds: 100), () {
       if (mounted) {
-        _restartPending = false;
-        _engine.setPosition(fen);
-        _engine.goInfinite();
+        setState(() {
+          _restartPending = false;
+          _startEngineSearch(target);
+        });
       }
     });
   }
@@ -400,16 +455,13 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
     setState(() {
       _isAnalyzing = true;
-      _latestInfo = null;
       _latestBestMove = null;
+      _staleLines = [];
       _bestMoveFrom = null;
       _bestMoveTo = null;
       _selectedSquare = null;
-      _analysisPosition = _position;
+      _startEngineSearch(_position);
     });
-
-    _engine.setPosition(_position.toFen());
-    _engine.goInfinite();
   }
 
   void _stopAnalysis() {
@@ -424,8 +476,10 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _historyIndex = 0;
       _fenController.text = _position.toFen();
       _selectedSquare = null;
-      _latestInfo = null;
       _latestBestMove = null;
+      _curByDepth.clear();
+      _staleLines = [];
+      _enginePosition = null;
       _bestMoveFrom = null;
       _bestMoveTo = null;
       _lastMoveFrom = null;
@@ -440,8 +494,10 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _historyIndex = 0;
       _fenController.text = _position.toFen();
       _selectedSquare = null;
-      _latestInfo = null;
       _latestBestMove = null;
+      _curByDepth.clear();
+      _staleLines = [];
+      _enginePosition = null;
       _bestMoveFrom = null;
       _bestMoveTo = null;
       _lastMoveFrom = null;
@@ -458,8 +514,10 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         _history = [Position.fromFen(fen)];
         _historyIndex = 0;
         _selectedSquare = null;
-        _latestInfo = null;
         _latestBestMove = null;
+        _curByDepth.clear();
+        _staleLines = [];
+        _enginePosition = null;
         _bestMoveFrom = null;
         _bestMoveTo = null;
         _lastMoveFrom = null;
@@ -487,8 +545,11 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Cap board width to 430px so it doesn't fill the entire iPad screen
-    const double maxBoardWidth = 430;
+    // On mobile the board fills the phone width (430 also caps it on iPad);
+    // on desktop there is room to make it noticeably larger.
+    final bool isDesktop =
+        Platform.isMacOS || Platform.isWindows || Platform.isLinux;
+    final double maxBoardWidth = isDesktop ? 640 : 430;
 
     return Scaffold(
       body: SafeArea(
@@ -496,10 +557,11 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
           builder: (context, constraints) {
             // Cap the board's height so it shrinks to fit short windows
             // instead of overflowing; leave room for the control rows and a
-            // usable analysis panel below.
+            // usable analysis panel below. The ceiling matches maxBoardWidth's
+            // 9:10 aspect so height, not the ceiling, is what caps a big board.
             final double boardMaxHeight = (constraints.maxHeight - 340).clamp(
               160.0,
-              620.0,
+              isDesktop ? 760.0 : 620.0,
             );
             return Column(
               children: [
@@ -694,9 +756,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                 Expanded(
                   child: SingleChildScrollView(
                     child: AnalysisPanel(
-                      info: _latestInfo,
+                      lines: _analysisLines,
                       bestMove: _latestBestMove,
-                      position: _analysisPosition ?? _position,
+                      position: _enginePosition ?? _position,
                     ),
                   ),
                 ),
