@@ -857,25 +857,42 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                   ),
                 if (_history.length > 1) const Divider(height: 1),
 
-                // Cloud candidates + engine analysis (scroll together)
+                // Engine analysis and cloud candidates in separate tabs
                 Expanded(
-                  child: SingleChildScrollView(
+                  child: DefaultTabController(
+                    length: 2,
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CandidateMoves(
-                          position: _position,
-                          language: widget.settings.language,
-                          scorePerspective: widget.settings.scorePerspective,
-                          onPlay: _playUci,
+                        const TabBar(
+                          tabs: [
+                            Tab(text: 'Engine'),
+                            Tab(text: 'Cloud'),
+                          ],
                         ),
-                        const Divider(height: 1),
-                        AnalysisPanel(
-                          lines: _analysisLines,
-                          bestMove: _latestBestMove,
-                          position: _enginePosition ?? _position,
-                          language: widget.settings.language,
-                          scorePerspective: widget.settings.scorePerspective,
+                        Expanded(
+                          child: TabBarView(
+                            children: [
+                              SingleChildScrollView(
+                                child: AnalysisPanel(
+                                  lines: _analysisLines,
+                                  bestMove: _latestBestMove,
+                                  position: _enginePosition ?? _position,
+                                  language: widget.settings.language,
+                                  scorePerspective:
+                                      widget.settings.scorePerspective,
+                                ),
+                              ),
+                              SingleChildScrollView(
+                                child: CandidateMoves(
+                                  position: _position,
+                                  language: widget.settings.language,
+                                  scorePerspective:
+                                      widget.settings.scorePerspective,
+                                  onPlay: _playUci,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
