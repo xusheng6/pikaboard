@@ -1316,7 +1316,7 @@ void main() {
 
     testWidgets('clicking a move in a line asks to walk it', (tester) async {
       final start = Position.startPosition();
-      List<String>? walked;
+      SearchInfo? walked;
       Position? from;
       int? ply;
 
@@ -1331,8 +1331,8 @@ void main() {
                 ),
               ],
               position: start,
-              onExplore: (moves, position, index) {
-                walked = moves;
+              onExplore: (info, position, index) {
+                walked = info;
                 from = position;
                 ply = index;
               },
@@ -1343,7 +1343,8 @@ void main() {
 
       // The second move of the line: walking should stop right after it.
       await tester.tap(find.text('马8进7'));
-      expect(walked, ['h2e2', 'h9g7', 'h0g2']);
+      expect(walked!.pv, ['h2e2', 'h9g7', 'h0g2']);
+      expect(walked!.depth, 12, reason: 'the line brings its own stats');
       expect(from!.toFen(), start.toFen());
       expect(ply, 2);
     });

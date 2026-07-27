@@ -153,6 +153,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   // onto.
   GameNode? _exploreAnchor;
 
+  // The search result the walked line came from, for its depth and score.
+  SearchInfo? _exploringInfo;
+
   // Where the game was loaded from or last saved to, when that is a file we
   // can write back to.
   String? _currentFilePath;
@@ -333,6 +336,26 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   /// everything behind the engine's choice drawn back.
   List<BoardArrow> get _boardArrows {
     final settings = widget.settings;
+
+    // Walking a line, the engine's candidates belong to another position
+    // entirely; all that is worth drawing is where this line goes next, and
+    // numbering that would suggest a ranking it does not have.
+    final exploring = _exploring;
+    if (exploring != null) {
+      final next = exploring.nextMove;
+      final from = _uciSquare(next, 0);
+      final to = _uciSquare(next, 2);
+      if (from == null || to == null) return const [];
+      return [
+        BoardArrow(
+          from: from,
+          to: to,
+          side: exploring.position.sideToMove,
+          label: '',
+        ),
+      ];
+    }
+
     final sideToMove = (_enginePosition ?? _position).sideToMove;
 
     if (settings.multiPv > 1) {
@@ -793,11 +816,12 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   /// The moves are copied rather than followed live: the engine rewrites its
   /// line as it searches, and reading a line that moves underfoot is worse
   /// than useless.
-  void _exploreLine(List<String> moves, Position from, int ply) {
+  void _exploreLine(SearchInfo info, Position from, int ply) {
     setState(() {
+      _exploringInfo = info;
       _exploring = ExploredLine(
         start: from,
-        moves: List<String>.unmodifiable(moves),
+        moves: List<String>.unmodifiable(info.pv),
         index: ply,
       );
       // Only a node standing on the searched position can hold this line.
@@ -814,10 +838,17 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     setState(() => _exploring = line.at(line.index + delta));
   }
 
+  void _seekExploration(int index) {
+    final line = _exploring;
+    if (line == null) return;
+    setState(() => _exploring = line.at(index));
+  }
+
   void _stopExploring() {
     setState(() {
       _exploring = null;
       _exploreAnchor = null;
+      _exploringInfo = null;
     });
   }
 
@@ -830,6 +861,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       final end = anchor.addLine(line.moves.take(line.index));
       _exploring = null;
       _exploreAnchor = null;
+      _exploringInfo = null;
       _current = end;
       _fenController.text = _position.toFen();
       _updateLastMoveHighlight();
@@ -837,15 +869,34 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     });
   }
 
-  /// Controls for a line being walked: where you are in it, how to move along
-  /// it, and whether to keep it.
+  /// Controls for a line being walked: which line it is, where you are in it,
+  /// how to move along it, and whether to keep it.
   Widget _explorationBanner(BuildContext context, ExploredLine line) {
     final theme = Theme.of(context);
-    final language = widget.settings.language;
+    final settings = widget.settings;
+    final info = _exploringInfo;
+    final onContainer = theme.colorScheme.onSecondaryContainer;
+
+    final score = info == null
+        ? null
+        : formatScore(
+            info,
+            sideToMoveIsRed: line.start.sideToMove == PieceColor.red,
+            redPerspective: settings.scorePerspective == ScorePerspective.red,
+          );
     final next = line.nextMove;
-    final nextText = next == null
-        ? 'end of line'
-        : MoveNotation.toNotation(next, line.position, language);
+
+    Widget step({
+      required IconData icon,
+      required String tooltip,
+      required VoidCallback? onPressed,
+    }) => IconButton(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 20),
+      tooltip: tooltip,
+      visualDensity: VisualDensity.compact,
+      color: onContainer,
+    );
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -856,35 +907,56 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       ),
       child: Row(
         children: [
-          Icon(
-            Icons.travel_explore,
-            size: 16,
-            color: theme.colorScheme.onSecondaryContainer,
-          ),
+          Icon(Icons.travel_explore, size: 16, color: onContainer),
           const SizedBox(width: 6),
+          // Which line this is, and how good the engine thought it was.
           Flexible(
-            child: Text(
-              'Engine line  ${line.index}/${line.moves.length}'
-              '${next == null ? '' : '  ·  next $nextText'}',
-              style: TextStyle(
-                fontSize: 12,
-                color: theme.colorScheme.onSecondaryContainer,
-              ),
+            child: RichText(
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              text: TextSpan(
+                style: TextStyle(fontSize: 12, color: onContainer),
+                children: [
+                  if (info != null && info.multiPV > 1)
+                    TextSpan(text: '#${info.multiPV}  '),
+                  TextSpan(text: '${line.index}/${line.moves.length}'),
+                  if (info != null)
+                    TextSpan(text: '  ·  d${info.depth}  ${info.timeText}'),
+                  if (score != null)
+                    TextSpan(
+                      text: '  ${score.text}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  if (next != null)
+                    TextSpan(
+                      text:
+                          '  ·  next ${MoveNotation.toNotation(next, line.position, settings.language)}',
+                    ),
+                ],
+              ),
             ),
           ),
-          IconButton(
-            onPressed: line.canStepBack ? () => _stepExploration(-1) : null,
-            icon: const Icon(Icons.chevron_left, size: 22),
-            tooltip: 'Back one move',
-            visualDensity: VisualDensity.compact,
+          step(
+            icon: Icons.skip_previous,
+            tooltip: 'Start of line',
+            onPressed: line.canStepBack ? () => _seekExploration(0) : null,
           ),
-          IconButton(
-            onPressed: line.canStepForward ? () => _stepExploration(1) : null,
-            icon: const Icon(Icons.chevron_right, size: 22),
+          step(
+            icon: Icons.chevron_left,
+            tooltip: 'Back one move',
+            onPressed: line.canStepBack ? () => _stepExploration(-1) : null,
+          ),
+          step(
+            icon: Icons.chevron_right,
             tooltip: 'Forward one move',
-            visualDensity: VisualDensity.compact,
+            onPressed: line.canStepForward ? () => _stepExploration(1) : null,
+          ),
+          step(
+            icon: Icons.skip_next,
+            tooltip: 'End of line',
+            onPressed: line.canStepForward
+                ? () => _seekExploration(line.moves.length)
+                : null,
           ),
           TextButton.icon(
             // Only a game standing on the position the line came from can

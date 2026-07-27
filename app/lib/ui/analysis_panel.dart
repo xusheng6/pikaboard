@@ -63,9 +63,9 @@ class AnalysisPanel extends StatelessWidget {
   /// Draw previews rotated, matching a board viewed from Black's side.
   final bool viewFromBlack;
 
-  /// Walk a line: called with the line's moves, the position it starts from,
-  /// and how many of them to play.
-  final void Function(List<String> moves, Position from, int ply)? onExplore;
+  /// Walk a line: called with the line itself, the position it starts from,
+  /// and how many of its moves to play.
+  final void Function(SearchInfo info, Position from, int ply)? onExplore;
 
   /// Rows to show, current-position lines first (deepest on top) followed by
   /// any stale previous-position lines.
@@ -294,7 +294,7 @@ class _LineRow extends StatelessWidget {
   /// A line from an earlier iteration of the current search.
   final bool superseded;
 
-  final void Function(List<String> moves, Position from, int ply)? onExplore;
+  final void Function(SearchInfo info, Position from, int ply)? onExplore;
 
   const _LineRow({
     required this.line,
@@ -380,7 +380,7 @@ class _LineRow extends StatelessWidget {
           Expanded(
             child: showPreview
                 ? _PvMoves(
-                    pvText: info.pvText,
+                    info: info,
                     position: line.position,
                     language: language,
                     viewFromBlack: viewFromBlack,
@@ -410,14 +410,14 @@ class _LineRow extends StatelessWidget {
 
 /// A line's moves, each hoverable to preview the position it leads to.
 class _PvMoves extends StatelessWidget {
-  final String pvText;
+  final SearchInfo info;
   final Position position;
   final DisplayLanguage language;
   final bool viewFromBlack;
-  final void Function(List<String> moves, Position from, int ply)? onExplore;
+  final void Function(SearchInfo info, Position from, int ply)? onExplore;
 
   const _PvMoves({
-    required this.pvText,
+    required this.info,
     required this.position,
     required this.language,
     this.viewFromBlack = false,
@@ -426,7 +426,7 @@ class _PvMoves extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final steps = MoveNotation.pvSteps(pvText, position, language);
+    final steps = MoveNotation.pvSteps(info.pvText, position, language);
     if (steps.isEmpty) return const SizedBox.shrink();
 
     // Wrapped rather than one string so each move can be hovered; clipped to
@@ -463,11 +463,7 @@ class _PvMoves extends StatelessWidget {
                   // Clicking walks the board to this point of the line.
                   onTap: onExplore == null
                       ? null
-                      : () => onExplore!(
-                          [for (final step in steps) step.uci],
-                          position,
-                          i + 1,
-                        ),
+                      : () => onExplore!(info, position, i + 1),
                   borderRadius: BorderRadius.circular(3),
                   child: Text(
                     steps[i].notation,
