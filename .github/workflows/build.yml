@@ -15,9 +15,9 @@ concurrency:
 
 env:
   FLUTTER_VERSION: "3.41.2"
-  # Set this repository variable to the real weights to build something
-  # playable; without it the NNUE is a placeholder and the build only proves
-  # that it compiles.
+  # The NNUE weights come from the Pikafish release that matches the pinned
+  # submodule. Set this repository variable only to build against a different
+  # network on purpose.
   PIKAFISH_NNUE_URL: ${{ vars.PIKAFISH_NNUE_URL }}
 
 jobs:
@@ -30,6 +30,11 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      - name: Cache the NNUE weights
+        uses: actions/cache@v4
+        with:
+          path: app/assets/pikafish.nnue
+          key: nnue-${{ hashFiles('scripts/ci_prepare_nnue.sh') }}
       - run: ./scripts/ci_prepare_nnue.sh
       - run: flutter pub get
         working-directory: app
@@ -51,6 +56,11 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      - name: Cache the NNUE weights
+        uses: actions/cache@v4
+        with:
+          path: app/assets/pikafish.nnue
+          key: nnue-${{ hashFiles('scripts/ci_prepare_nnue.sh') }}
       - run: ./scripts/ci_prepare_nnue.sh
       # The desktop app drives Pikafish as a subprocess, so the bundle needs
       # the real executable; Xcode's copy phase expects it at macos/engine.
@@ -79,6 +89,11 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      - name: Cache the NNUE weights
+        uses: actions/cache@v4
+        with:
+          path: app/assets/pikafish.nnue
+          key: nnue-${{ hashFiles('scripts/ci_prepare_nnue.sh') }}
       - run: ./scripts/ci_prepare_nnue.sh
       # Mobile reaches the engine through FFI rather than a subprocess, so the
       # engine and its bridge are linked in as build/ios-arm64/libpikafish.a —
@@ -104,6 +119,11 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      - name: Cache the NNUE weights
+        uses: actions/cache@v4
+        with:
+          path: app/assets/pikafish.nnue
+          key: nnue-${{ hashFiles('scripts/ci_prepare_nnue.sh') }}
       - run: ./scripts/ci_prepare_nnue.sh
       - run: flutter pub get
         working-directory: app
@@ -133,6 +153,11 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      - name: Cache the NNUE weights
+        uses: actions/cache@v4
+        with:
+          path: app/assets/pikafish.nnue
+          key: nnue-${{ hashFiles('scripts/ci_prepare_nnue.sh') }}
       - run: ./scripts/ci_prepare_nnue.sh
       - run: flutter pub get
         working-directory: app
@@ -159,6 +184,11 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      - name: Cache the NNUE weights
+        uses: actions/cache@v4
+        with:
+          path: app/assets/pikafish.nnue
+          key: nnue-${{ hashFiles('scripts/ci_prepare_nnue.sh') }}
       - name: Prepare the NNUE
         shell: bash
         run: ./scripts/ci_prepare_nnue.sh
