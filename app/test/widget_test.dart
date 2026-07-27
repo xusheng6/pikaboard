@@ -17,6 +17,7 @@ import 'package:app/ui/hover_preview.dart';
 import 'package:app/ui/engine_output.dart';
 import 'package:app/models/game.dart';
 import 'package:app/ui/move_table.dart';
+import 'package:app/ui/piece_palette.dart';
 import 'package:app/ui/move_tree.dart';
 import 'package:app/ui/variation_list.dart';
 import 'package:app/ui/score_chart.dart';
@@ -471,6 +472,106 @@ void main() {
       expect(s.fontSize, FontSizeSetting.large);
       expect(s.highlightLastMove, isTrue);
       expect(s.highlightPonderMove, isTrue);
+    });
+  });
+
+  group('Setup editing', () {
+    test('clearing keeps both kings on the board', () {
+      final board = Position.kingsOnly();
+      final pieces = [
+        for (var sq = 0; sq < Position.squareCount; sq++)
+          if (board.pieceAt(sq) != null) board.pieceAt(sq)!,
+      ];
+      expect(pieces.length, 2);
+      expect(pieces.every((p) => p.type == PieceType.king), isTrue);
+      expect(
+        board.pieceAt(Position.uciToSquare('e0')!),
+        const Piece(PieceColor.red, PieceType.king),
+      );
+      expect(
+        board.pieceAt(Position.uciToSquare('e9')!),
+        const Piece(PieceColor.black, PieceType.king),
+      );
+      // And it is a position the engine can be handed.
+      expect(board.toFen(), '4k4/9/9/9/9/9/9/9/9/4K4 w');
+    });
+
+    testWidgets('the palette arms a piece and offers the editing actions', (
+      tester,
+    ) async {
+      Piece? picked;
+      var deleted = 0, cleared = 0, reset = 0, done = 0;
+
+      Future<void> pump({Piece? selected, bool hasSquare = false}) =>
+          tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: PiecePalette(
+                  selected: selected,
+                  hasSelectedSquare: hasSquare,
+                  onPick: (piece) => picked = piece,
+                  onDelete: () => deleted++,
+                  onClear: () => cleared++,
+                  onReset: () => reset++,
+                  onDone: () => done++,
+                ),
+              ),
+            ),
+          );
+
+      await pump();
+      // Every piece of both colours is offered: 7 types twice, and the two
+      // kings share a glyph with nothing else.
+      expect(find.text('兵'), findsOneWidget);
+      expect(find.text('卒'), findsOneWidget);
+      expect(find.text('马'), findsNWidgets(2));
+
+      await tester.tap(find.text('兵'));
+      expect(picked, const Piece(PieceColor.red, PieceType.pawn));
+
+      // Delete only works on a selected square.
+      await pump();
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.ancestor(
+                of: find.text('Delete'),
+                matching: find.byType(OutlinedButton),
+              ),
+            )
+            .onPressed,
+        isNull,
+      );
+      await pump(hasSquare: true);
+      await tester.tap(find.text('Delete'));
+      await tester.tap(find.text('Clear'));
+      await tester.tap(find.text('Reset'));
+      await tester.tap(find.text('Done'));
+      expect([deleted, cleared, reset, done], [1, 1, 1, 1]);
+
+      // Picking the armed piece again disarms it.
+      picked = const Piece(PieceColor.red, PieceType.pawn);
+      await pump(selected: const Piece(PieceColor.red, PieceType.pawn));
+      await tester.tap(find.text('兵'));
+      expect(picked, isNull);
+    });
+
+    testWidgets('right-clicking a square reports it', (tester) async {
+      int? secondary;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BoardWidget(
+              position: Position.startPosition(),
+              onSquareSecondaryTap: (square) => secondary = square,
+            ),
+          ),
+        ),
+      );
+
+      // Long-press stands in for right-click, which the same handler serves.
+      await tester.longPress(find.text('帅'));
+      expect(secondary, Position.uciToSquare('e0'));
     });
   });
 

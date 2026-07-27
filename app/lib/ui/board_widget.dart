@@ -53,6 +53,9 @@ class BoardWidget extends StatelessWidget {
   /// setting: the position, and therefore every square index, is unchanged.
   final bool viewFromBlack;
   final ValueChanged<int>? onSquareTap;
+
+  /// Right-click (or long-press) on a square, used to empty it while editing.
+  final ValueChanged<int>? onSquareSecondaryTap;
   final DisplayLanguage language;
 
   const BoardWidget({
@@ -64,6 +67,7 @@ class BoardWidget extends StatelessWidget {
     this.arrows = const [],
     this.viewFromBlack = false,
     this.onSquareTap,
+    this.onSquareSecondaryTap,
     this.language = DisplayLanguage.simplified,
   });
 
@@ -132,6 +136,12 @@ class BoardWidget extends StatelessWidget {
       height: cellH,
       child: GestureDetector(
         onTap: () => onSquareTap?.call(square),
+        onSecondaryTap: onSquareSecondaryTap == null
+            ? null
+            : () => onSquareSecondaryTap!(square),
+        onLongPress: onSquareSecondaryTap == null
+            ? null
+            : () => onSquareSecondaryTap!(square),
         behavior: HitTestBehavior.opaque,
         child: Center(
           child: Stack(

@@ -21,6 +21,7 @@ import 'engine_output.dart';
 import 'move_table.dart';
 import 'move_tree.dart';
 import 'notes_panel.dart';
+import 'piece_palette.dart';
 import 'score_chart.dart';
 import 'settings_page.dart';
 import 'variation_list.dart';
@@ -134,10 +135,13 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   // Bumped per restart so an older one cannot resume over a newer one.
   int _searchGeneration = 0;
   bool _isSetupMode = false;
-  PieceColor _setupColor = PieceColor.red;
 
   // View-only board rotation; leaves the position untouched.
   bool _viewFromBlack = false;
+
+  // The piece armed from the palette while editing; the next square tapped
+  // receives it.
+  Piece? _palettePiece;
 
   // Where the game was loaded from or last saved to, when that is a file we
   // can write back to.
@@ -687,24 +691,15 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     });
   }
 
-  void _handleSetupTap(int square) {
-    setState(() {
-      final existing = _position.pieceAt(square);
-      if (existing != null) {
-        // Remove piece
-        _replaceCurrentPosition(_position.withPiece(square, null));
-      } else {
-        // Show piece picker
-        _showPiecePicker(square);
-      }
-      _fenController.text = _position.toFen();
-    });
-  }
-
   /// Setup edits rewrite the position itself, so the edited board becomes the
   /// new starting point; any moves recorded from the old one are dropped.
   void _replaceCurrentPosition(Position pos) {
+    final wasEditing = _isSetupMode;
+    final armed = _palettePiece;
     _loadGame(Game.fromPosition(pos, metadata: _game.metadata));
+    // Loading a game leaves editing; an edit should not.
+    _isSetupMode = wasEditing;
+    _palettePiece = armed;
   }
 
   /// Show [game] from its root, clearing everything tied to the old one.
@@ -713,6 +708,8 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     _current = game.root;
     _fenController.text = _position.toFen();
     _selectedSquare = null;
+    _palettePiece = null;
+    _isSetupMode = false;
     _latestBestMove = null;
     _curLines.clear();
     _staleLines = [];
@@ -725,82 +722,61 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     _lastMoveTo = null;
   }
 
-  void _showPiecePicker(int square) {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Place piece at ${Position.squareToUci(square)}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  ToggleButtons(
-                    isSelected: [
-                      _setupColor == PieceColor.red,
-                      _setupColor == PieceColor.black,
-                    ],
-                    onPressed: (i) {
-                      setState(() {
-                        _setupColor = i == 0
-                            ? PieceColor.red
-                            : PieceColor.black;
-                      });
-                      Navigator.pop(context);
-                      _showPiecePicker(square);
-                    },
-                    children: const [
-                      Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('Red', style: TextStyle(color: Colors.red)),
-                      ),
-                      Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('Black'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: PieceType.values.map((type) {
-                  final piece = Piece(_setupColor, type);
-                  return ActionChip(
-                    label: Text(
-                      piece.label,
-                      style: TextStyle(
-                        fontSize: 22,
-                        color: _setupColor == PieceColor.red
-                            ? Colors.red.shade800
-                            : Colors.black,
-                      ),
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _replaceCurrentPosition(
-                          _position.withPiece(square, piece),
-                        );
-                        _fenController.text = _position.toFen();
-                      });
-                      Navigator.pop(context);
-                    },
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+  /// Editing taps: place the armed piece, move the selected one, or select
+  /// what was tapped.
+  void _handleSetupTap(int square) {
+    setState(() {
+      final armed = _palettePiece;
+      if (armed != null) {
+        // Placing stays armed, so a rank of pawns is a rank of taps.
+        _replaceCurrentPosition(_position.withPiece(square, armed));
+        _selectedSquare = null;
+        return;
+      }
+
+      final selected = _selectedSquare;
+      if (selected != null && selected != square) {
+        final moving = _position.pieceAt(selected);
+        if (moving != null) {
+          _replaceCurrentPosition(
+            _position.withPiece(selected, null).withPiece(square, moving),
+          );
+        }
+        _selectedSquare = null;
+        return;
+      }
+
+      // Tapping the selected piece again, or an empty square, just changes
+      // what is selected.
+      _selectedSquare = selected == square || _position.pieceAt(square) == null
+          ? null
+          : square;
+    });
+  }
+
+  /// Right-click or long-press while editing empties a square.
+  void _handleSetupSecondaryTap(int square) {
+    if (!_isSetupMode || _position.pieceAt(square) == null) return;
+    setState(() {
+      _replaceCurrentPosition(_position.withPiece(square, null));
+      if (_selectedSquare == square) _selectedSquare = null;
+    });
+  }
+
+  /// Empty the selected square, for people who would rather press a button
+  /// than right-click.
+  void _deleteSelectedPiece() {
+    final square = _selectedSquare;
+    if (square == null) return;
+    _handleSetupSecondaryTap(square);
+  }
+
+  void _setSetupMode(bool editing) {
+    setState(() {
+      _isSetupMode = editing;
+      _palettePiece = null;
+      _selectedSquare = null;
+    });
   }
 
   void _startAnalysis() {
@@ -1141,12 +1117,22 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
   void _resetPosition() {
     if (_isAnalyzing) _stopAnalysis();
-    setState(() => _loadGame(Game.fromPosition(Position.startPosition())));
+    final wasEditing = _isSetupMode;
+    setState(() {
+      _loadGame(Game.fromPosition(Position.startPosition()));
+      _isSetupMode = wasEditing;
+    });
   }
 
+  /// Strip the board back to the two kings — a position the engine can still
+  /// read, unlike an empty board.
   void _clearBoard() {
     if (_isAnalyzing) _stopAnalysis();
-    setState(() => _loadGame(Game.fromPosition(Position.empty())));
+    final wasEditing = _isSetupMode;
+    setState(() {
+      _loadGame(Game.fromPosition(Position.kingsOnly()));
+      _isSetupMode = wasEditing;
+    });
   }
 
   void _applyFen() {
@@ -1259,30 +1245,58 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                     ),
                   ),
 
-                  // Board — constrained to maxBoardWidth
+                  // Board — constrained to maxBoardWidth, with the piece
+                  // palette beside it while editing.
                   Center(
                     child: ConstrainedBox(
                       constraints: BoxConstraints(
-                        maxWidth: maxBoardWidth,
+                        maxWidth: _isSetupMode
+                            ? maxBoardWidth + textScaler.scale(150)
+                            : maxBoardWidth,
                         maxHeight: boardMaxHeight,
                       ),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: BoardWidget(
-                          position: _position,
-                          selectedSquare: _selectedSquare,
-                          // Each indicator is independently switchable in
-                          // settings; when off it is simply not passed.
-                          lastMoveFrom: settings.highlightLastMove
-                              ? _lastMoveFrom
-                              : null,
-                          lastMoveTo: settings.highlightLastMove
-                              ? _lastMoveTo
-                              : null,
-                          arrows: _boardArrows,
-                          viewFromBlack: _viewFromBlack,
-                          onSquareTap: _onSquareTap,
-                          language: settings.language,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: BoardWidget(
+                                position: _position,
+                                selectedSquare: _selectedSquare,
+                                // Each indicator is independently switchable
+                                // in settings; when off it is not passed.
+                                lastMoveFrom: settings.highlightLastMove
+                                    ? _lastMoveFrom
+                                    : null,
+                                lastMoveTo: settings.highlightLastMove
+                                    ? _lastMoveTo
+                                    : null,
+                                arrows: _isSetupMode ? const [] : _boardArrows,
+                                viewFromBlack: _viewFromBlack,
+                                onSquareTap: _onSquareTap,
+                                onSquareSecondaryTap: _isSetupMode
+                                    ? _handleSetupSecondaryTap
+                                    : null,
+                                language: settings.language,
+                              ),
+                            ),
+                            if (_isSetupMode)
+                              SizedBox(
+                                width: textScaler.scale(142),
+                                child: PiecePalette(
+                                  selected: _palettePiece,
+                                  hasSelectedSquare: _selectedSquare != null,
+                                  language: settings.language,
+                                  onPick: (piece) =>
+                                      setState(() => _palettePiece = piece),
+                                  onDelete: _deleteSelectedPiece,
+                                  onClear: _clearBoard,
+                                  onReset: _resetPosition,
+                                  onDone: () => _setSetupMode(false),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ),
@@ -1468,16 +1482,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                           visualDensity: VisualDensity.compact,
                         ),
                         TextButton.icon(
-                          onPressed: _isAnalyzing ? null : _clearBoard,
-                          icon: const Icon(Icons.clear_all, size: 18),
-                          label: const Text('Clear'),
-                        ),
-                        TextButton.icon(
                           onPressed: _isAnalyzing
                               ? null
-                              : () => setState(
-                                  () => _isSetupMode = !_isSetupMode,
-                                ),
+                              : () => _setSetupMode(!_isSetupMode),
                           icon: Icon(
                             _isSetupMode ? Icons.check : Icons.edit,
                             size: 18,

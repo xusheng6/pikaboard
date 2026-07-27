@@ -28,6 +28,17 @@ class Position {
     );
   }
 
+  /// An otherwise empty board with both kings on their starting squares.
+  ///
+  /// Clearing to nothing would leave a position no engine can evaluate, so
+  /// this is what "empty" means when editing.
+  factory Position.kingsOnly() {
+    final squares = List<Piece?>.filled(squareCount, null);
+    squares[uciToSquare('e0')!] = const Piece(PieceColor.red, PieceType.king);
+    squares[uciToSquare('e9')!] = const Piece(PieceColor.black, PieceType.king);
+    return Position(squares: squares, sideToMove: PieceColor.red);
+  }
+
   factory Position.startPosition() {
     return Position.fromFen(startFen);
   }
