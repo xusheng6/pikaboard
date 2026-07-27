@@ -54,8 +54,15 @@ CXXFLAGS="-std=c++17 -fno-exceptions -O3 -funroll-loops \
 echo "=== Building Pikafish static library for $TARGET ==="
 echo "Build dir: $BUILD_DIR"
 
-# Collect all .cpp source files, excluding main.cpp
-SOURCES=$(find "$PIKAFISH_SRC" -name '*.cpp' ! -name 'main.cpp' | sort)
+# Collect all .cpp source files, excluding main.cpp.
+#
+# universal/ is pruned exactly as Pikafish's own Makefile prunes it: those
+# files implement runtime CPU dispatch for the *-universal targets and reach
+# for Linux-only headers such as <sys/auxv.h>, which do not exist on Apple
+# platforms. temp_builds/ is scratch left by that same machinery.
+SOURCES=$(find "$PIKAFISH_SRC" \
+    \( -path '*/universal' -o -path '*/temp_builds' \) -prune -o \
+    -name '*.cpp' ! -name 'main.cpp' -print | sort)
 
 # Count files for progress
 TOTAL=$(echo "$SOURCES" | wc -l | tr -d ' ')

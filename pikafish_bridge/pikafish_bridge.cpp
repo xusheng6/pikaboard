@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "attacks.h"
 #include "bitboard.h"
 #include "engine.h"
 #include "misc.h"
@@ -143,8 +144,10 @@ int pikafish_init(const char* nnue_dir) {
     fprintf(stderr, "[pikafish] init: starting, nnue_dir=%s\n", nnue_dir ? nnue_dir : "(null)");
     fflush(stderr);
 
-    fprintf(stderr, "[pikafish] init: Bitboards::init()...\n"); fflush(stderr);
-    Bitboards::init();
+    // Upstream moved this out of Bitboards when attack generation was split
+    // into its own unit; it is what main.cpp calls before anything else.
+    fprintf(stderr, "[pikafish] init: Attacks::init()...\n"); fflush(stderr);
+    Attacks::init();
 
     fprintf(stderr, "[pikafish] init: Position::init()...\n"); fflush(stderr);
     Position::init();
@@ -162,7 +165,8 @@ int pikafish_init(const char* nnue_dir) {
     g_engine->set_on_bestmove([](const auto& bm, const auto& p) { on_bestmove(bm, p); });
     g_engine->set_on_update_no_moves([](const auto& i) { on_update_no_moves(i); });
     g_engine->set_on_iter([](const auto&) {}); // ignore iteration info
-    g_engine->set_on_verify_networks([](const auto&) {}); // ignore network verify messages
+    // Singular since upstream dropped the small-net verification.
+    g_engine->set_on_verify_network([](const auto&) {});
 
     g_initialized = true;
     fprintf(stderr, "[pikafish] init: done!\n"); fflush(stderr);

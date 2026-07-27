@@ -1,20 +1,21 @@
 #!/bin/bash
 # Put the engine's NNUE weights in place so the app can be built and can play.
 #
-# The weights are ~51 MB and deliberately not in git, but Flutter refuses to
+# The weights are ~50 MB and deliberately not in git, but Flutter refuses to
 # build with a declared asset missing, so CI fetches them.
 #
-# They come from the Pikafish release matching the pinned submodule, not from
-# the Networks repo's rolling "master-net": that one is a different network and
-# the engine built from this submodule rejects it outright ("Network evaluation
-# parameters compatible with the engine must be available"). Keep RELEASE_TAG
-# in step with the submodule when it moves.
+# The network and the engine are a matched pair: each rejects the other's
+# network outright ("Network evaluation parameters compatible with the engine
+# must be available") and terminates. The submodule tracks Pikafish master, so
+# the network is master-net, which upstream republishes in place whenever the
+# architecture changes. That is why a mismatch against the recorded checksum is
+# a loud warning rather than a failure: it means upstream has moved and the
+# submodule probably needs to move with it.
 set -e
 
-RELEASE_TAG="Pikafish-2026-01-02"
-ARCHIVE="Pikafish.2026-01-02.7z"
-ARCHIVE_URL="https://github.com/official-pikafish/Pikafish/releases/download/$RELEASE_TAG/$ARCHIVE"
-EXPECTED_SHA256="c4026370d7516d9b0f668447f9ca1931241538bdc689cde6fec6a991ac4d5f77"
+NNUE_URL="https://github.com/official-pikafish/Networks/releases/download/master-net/pikafish.nnue"
+# The network this app is currently developed and tested against.
+KNOWN_SHA256="3cd15292bf8c979884262f57fc723959fc0dea43b4d8d544f88db5ceb2479e24"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEST="$SCRIPT_DIR/../app/assets/pikafish.nnue"
@@ -27,71 +28,32 @@ sha256_of() {
     fi
 }
 
-if [ -s "$DEST" ] && [ "$(sha256_of "$DEST")" = "$EXPECTED_SHA256" ]; then
-    echo "NNUE already in place and matches $RELEASE_TAG"
+if [ -s "$DEST" ] && [ "$(sha256_of "$DEST")" = "$KNOWN_SHA256" ]; then
+    echo "NNUE already in place"
     exit 0
 fi
 
 mkdir -p "$(dirname "$DEST")"
 
-# An override, for building against a different network on purpose.
-if [ -n "$PIKAFISH_NNUE_URL" ]; then
-    echo "Downloading NNUE from PIKAFISH_NNUE_URL"
-    curl -fsSL --retry 3 "$PIKAFISH_NNUE_URL" -o "$DEST"
-    echo "Installed $(sha256_of "$DEST")"
-    exit 0
-fi
+# An override, for building against a particular network on purpose.
+URL="${PIKAFISH_NNUE_URL:-$NNUE_URL}"
+echo "Downloading NNUE from $URL"
+curl -fsSL --retry 3 "$URL" -o "$DEST"
 
-# The release ships everything in one .7z, so 7-Zip has to be around.
-find_7z() {
-    for candidate in 7zz 7z 7za "/c/Program Files/7-Zip/7z.exe"; do
-        if command -v "$candidate" > /dev/null 2>&1; then
-            echo "$candidate"
-            return 0
-        fi
-        if [ -x "$candidate" ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
-
-if ! SEVEN_ZIP="$(find_7z)"; then
-    echo "Installing 7-Zip"
-    if command -v brew > /dev/null 2>&1; then
-        brew install sevenzip > /dev/null
-    elif command -v apt-get > /dev/null 2>&1; then
-        sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full
-    fi
-    SEVEN_ZIP="$(find_7z)" || {
-        echo "No 7-Zip available to unpack $ARCHIVE" >&2
-        exit 1
-    }
-fi
-
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
-
-echo "Downloading $ARCHIVE"
-curl -fsSL --retry 3 "$ARCHIVE_URL" -o "$WORK/$ARCHIVE"
-
-echo "Extracting pikafish.nnue"
-# -y: no prompts, -r: the net sits in a directory inside the archive.
-"$SEVEN_ZIP" e -y -r "$WORK/$ARCHIVE" -o"$WORK" pikafish.nnue > /dev/null
-
-if [ ! -s "$WORK/pikafish.nnue" ]; then
-    echo "No pikafish.nnue inside $ARCHIVE" >&2
+if [ ! -s "$DEST" ]; then
+    echo "Downloaded network is empty" >&2
     exit 1
 fi
 
-ACTUAL="$(sha256_of "$WORK/pikafish.nnue")"
-if [ "$ACTUAL" != "$EXPECTED_SHA256" ]; then
-    echo "NNUE checksum mismatch for $RELEASE_TAG" >&2
-    echo "  expected $EXPECTED_SHA256" >&2
-    echo "  got      $ACTUAL" >&2
-    exit 1
+ACTUAL="$(sha256_of "$DEST")"
+if [ "$ACTUAL" = "$KNOWN_SHA256" ]; then
+    echo "Installed the expected network ($ACTUAL)"
+elif [ -n "$PIKAFISH_NNUE_URL" ]; then
+    echo "Installed a network from PIKAFISH_NNUE_URL ($ACTUAL)"
+else
+    echo "::warning::master-net has changed since this build was last verified."
+    echo "::warning::  expected $KNOWN_SHA256"
+    echo "::warning::  got      $ACTUAL"
+    echo "::warning::If the engine now rejects it, move the Pikafish submodule"
+    echo "::warning::to a commit matching this network and update KNOWN_SHA256."
 fi
-
-mv "$WORK/pikafish.nnue" "$DEST"
-echo "Installed the $RELEASE_TAG network ($(sha256_of "$DEST"))"
