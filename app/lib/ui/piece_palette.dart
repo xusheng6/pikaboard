@@ -27,6 +27,9 @@ class PiecePalette extends StatelessWidget {
   /// Leave editing.
   final VoidCallback onDone;
 
+  /// Match the board's orientation: viewed from Black, Black's pieces lead.
+  final bool viewFromBlack;
+
   final DisplayLanguage language;
 
   const PiecePalette({
@@ -38,6 +41,7 @@ class PiecePalette extends StatelessWidget {
     required this.onDone,
     this.selected,
     this.hasSelectedSquare = false,
+    this.viewFromBlack = false,
     this.language = DisplayLanguage.simplified,
   });
 
@@ -81,7 +85,10 @@ class PiecePalette extends StatelessWidget {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          for (final colour in PieceColor.values)
+                          for (final colour
+                              in viewFromBlack
+                                  ? PieceColor.values.reversed
+                                  : PieceColor.values)
                             _pieceButton(context, Piece(colour, type)),
                         ],
                       ),
@@ -135,10 +142,11 @@ class PiecePalette extends StatelessWidget {
     final theme = Theme.of(context);
     final isSelected = selected == piece;
     // The chips are cream whatever the app theme is, so the piece colours
-    // follow the board rather than the surface they sit on.
+    // follow the board rather than the surface they sit on — and Black needs
+    // real black to read against that cream.
     final colour = piece.color == PieceColor.red
         ? Colors.red.shade800
-        : Colors.black87;
+        : Colors.black;
 
     return Padding(
       padding: const EdgeInsets.all(2),
@@ -154,14 +162,14 @@ class PiecePalette extends StatelessWidget {
             color: const Color(0xFFFFF8DC),
             border: Border.all(
               color: isSelected ? theme.colorScheme.primary : colour,
-              width: isSelected ? 3 : 1.5,
+              width: isSelected ? 3 : 2,
             ),
           ),
           child: Center(
             child: Text(
               piece.labelFor(language),
               style: TextStyle(
-                fontSize: 15,
+                fontSize: 16,
                 fontWeight: FontWeight.bold,
                 color: colour,
                 height: 1,

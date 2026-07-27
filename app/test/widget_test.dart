@@ -556,6 +556,37 @@ void main() {
       expect(picked, isNull);
     });
 
+    testWidgets('the palette leads with the side the board is viewed from', (
+      tester,
+    ) async {
+      Future<void> pump({required bool flipped}) => tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PiecePalette(
+              viewFromBlack: flipped,
+              onPick: (_) {},
+              onDelete: () {},
+              onClear: () {},
+              onReset: () {},
+              onDone: () {},
+            ),
+          ),
+        ),
+      );
+
+      await pump(flipped: false);
+      expect(
+        tester.getCenter(find.text('帅')).dx,
+        lessThan(tester.getCenter(find.text('将')).dx),
+      );
+
+      await pump(flipped: true);
+      expect(
+        tester.getCenter(find.text('将')).dx,
+        lessThan(tester.getCenter(find.text('帅')).dx),
+      );
+    });
+
     testWidgets('right-clicking a square reports it', (tester) async {
       int? secondary;
       await tester.pumpWidget(

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -728,6 +729,13 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     setState(() {
       final armed = _palettePiece;
       if (armed != null) {
+        // An occupied square is not a place to drop a piece: select what is
+        // standing there instead, so nothing is overwritten by accident.
+        if (_position.pieceAt(square) != null) {
+          _palettePiece = null;
+          _selectedSquare = square;
+          return;
+        }
         // Placing stays armed, so a rank of pawns is a rank of taps.
         _replaceCurrentPosition(_position.withPiece(square, armed));
         _selectedSquare = null;
@@ -1207,6 +1215,21 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
               // game score beside it, notes and branches to the right.
               final wide = constraints.maxWidth >= 980;
 
+              // The board keeps one size whether or not the palette is out.
+              final paletteWidth = textScaler.scale(142);
+              final available = constraints.maxWidth - 16;
+              var boardWidth = math.min(
+                math.min(maxBoardWidth, available),
+                boardMaxHeight * Position.files / Position.ranks,
+              );
+              final reservePaletteSpace =
+                  available >= boardWidth + 2 * paletteWidth;
+              if (!reservePaletteSpace && _isSetupMode) {
+                // Too narrow to reserve it: the board gives way instead.
+                boardWidth = math.min(boardWidth, available - paletteWidth);
+              }
+              final boardHeight = boardWidth * Position.ranks / Position.files;
+
               final boardColumn = Column(
                 children: [
                   // FEN input
@@ -1245,59 +1268,60 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                     ),
                   ),
 
-                  // Board — constrained to maxBoardWidth, with the piece
-                  // palette beside it while editing.
+                  // Board, with the piece palette beside it while editing.
+                  // The palette's width is reserved on both sides whenever
+                  // the window can spare it, so opening it does not shove the
+                  // board sideways.
                   Center(
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: _isSetupMode
-                            ? maxBoardWidth + textScaler.scale(150)
-                            : maxBoardWidth,
-                        maxHeight: boardMaxHeight,
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: BoardWidget(
-                                position: _position,
-                                selectedSquare: _selectedSquare,
-                                // Each indicator is independently switchable
-                                // in settings; when off it is not passed.
-                                lastMoveFrom: settings.highlightLastMove
-                                    ? _lastMoveFrom
-                                    : null,
-                                lastMoveTo: settings.highlightLastMove
-                                    ? _lastMoveTo
-                                    : null,
-                                arrows: _isSetupMode ? const [] : _boardArrows,
-                                viewFromBlack: _viewFromBlack,
-                                onSquareTap: _onSquareTap,
-                                onSquareSecondaryTap: _isSetupMode
-                                    ? _handleSetupSecondaryTap
-                                    : null,
-                                language: settings.language,
-                              ),
+                    child: SizedBox(
+                      height: boardHeight,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (reservePaletteSpace)
+                            SizedBox(width: paletteWidth),
+                          SizedBox(
+                            width: boardWidth,
+                            child: BoardWidget(
+                              position: _position,
+                              selectedSquare: _selectedSquare,
+                              // Each indicator is independently switchable
+                              // in settings; when off it is not passed.
+                              lastMoveFrom: settings.highlightLastMove
+                                  ? _lastMoveFrom
+                                  : null,
+                              lastMoveTo: settings.highlightLastMove
+                                  ? _lastMoveTo
+                                  : null,
+                              arrows: _isSetupMode ? const [] : _boardArrows,
+                              viewFromBlack: _viewFromBlack,
+                              onSquareTap: _onSquareTap,
+                              onSquareSecondaryTap: _isSetupMode
+                                  ? _handleSetupSecondaryTap
+                                  : null,
+                              language: settings.language,
                             ),
-                            if (_isSetupMode)
-                              SizedBox(
-                                width: textScaler.scale(142),
-                                child: PiecePalette(
-                                  selected: _palettePiece,
-                                  hasSelectedSquare: _selectedSquare != null,
-                                  language: settings.language,
-                                  onPick: (piece) =>
-                                      setState(() => _palettePiece = piece),
-                                  onDelete: _deleteSelectedPiece,
-                                  onClear: _clearBoard,
-                                  onReset: _resetPosition,
-                                  onDone: () => _setSetupMode(false),
-                                ),
+                          ),
+                          if (_isSetupMode)
+                            SizedBox(
+                              width: paletteWidth,
+                              child: PiecePalette(
+                                selected: _palettePiece,
+                                hasSelectedSquare: _selectedSquare != null,
+                                viewFromBlack: _viewFromBlack,
+                                language: settings.language,
+                                onPick: (piece) =>
+                                    setState(() => _palettePiece = piece),
+                                onDelete: _deleteSelectedPiece,
+                                onClear: _clearBoard,
+                                onReset: _resetPosition,
+                                onDone: () => _setSetupMode(false),
                               ),
-                          ],
-                        ),
+                            )
+                          else if (reservePaletteSpace)
+                            SizedBox(width: paletteWidth),
+                        ],
                       ),
                     ),
                   ),
