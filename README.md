@@ -94,6 +94,9 @@ flutter run
 
 ```
 pikaboard/
+├── docs/
+│   ├── xqf-format.md          # The XQF game record format, documented
+│   └── xqf.ksy                # ... and as a Kaitai Struct definition
 ├── Pikafish/                  # Engine source (git submodule)
 ├── pikafish_bridge/
 │   ├── pikafish_bridge.h      # C-linkage API header
@@ -121,6 +124,12 @@ pikaboard/
         └── Flutter/
             └── Pikafish.xcconfig       # Static library linkage config
 ```
+
+## Documentation
+
+- [The XQF game record format](docs/xqf-format.md) — the format XQStudio
+  writes, reverse engineered from its source and checked against 399 files,
+  with a [Kaitai Struct definition](docs/xqf.ksy) alongside it.
 
 ## License
 
