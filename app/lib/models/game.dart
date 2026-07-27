@@ -151,6 +151,18 @@ class GameNode {
     return child;
   }
 
+  /// Play [uciMoves] from here, returning the node the line ends on.
+  ///
+  /// Moves already recorded are followed rather than duplicated, so adding a
+  /// line that starts like an existing one extends it instead of forking.
+  GameNode addLine(Iterable<String> uciMoves) {
+    var node = this;
+    for (final uci in uciMoves) {
+      node = node.addMove(uci);
+    }
+    return node;
+  }
+
   /// Detach this node (and its subtree) from its parent.
   void remove() {
     parent?.children.remove(this);

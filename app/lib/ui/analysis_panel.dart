@@ -63,6 +63,10 @@ class AnalysisPanel extends StatelessWidget {
   /// Draw previews rotated, matching a board viewed from Black's side.
   final bool viewFromBlack;
 
+  /// Walk a line: called with the line's moves, the position it starts from,
+  /// and how many of them to play.
+  final void Function(List<String> moves, Position from, int ply)? onExplore;
+
   /// Rows to show, current-position lines first (deepest on top) followed by
   /// any stale previous-position lines.
   final List<AnalysisLine> lines;
@@ -87,6 +91,7 @@ class AnalysisPanel extends StatelessWidget {
     this.scorePerspective = ScorePerspective.red,
     this.showPreview = true,
     this.viewFromBlack = false,
+    this.onExplore,
   });
 
   /// True when the engine is reporting alternatives, so rows need numbering.
@@ -139,6 +144,7 @@ class AnalysisPanel extends StatelessWidget {
                       viewFromBlack: viewFromBlack,
                       showRank: showsRank,
                       superseded: !line.stale && line.info.depth < _latestDepth,
+                      onExplore: onExplore,
                     ),
                 ],
               ],
@@ -288,6 +294,8 @@ class _LineRow extends StatelessWidget {
   /// A line from an earlier iteration of the current search.
   final bool superseded;
 
+  final void Function(List<String> moves, Position from, int ply)? onExplore;
+
   const _LineRow({
     required this.line,
     required this.language,
@@ -296,6 +304,7 @@ class _LineRow extends StatelessWidget {
     this.viewFromBlack = false,
     this.showRank = false,
     this.superseded = false,
+    this.onExplore,
   });
 
   @override
@@ -375,6 +384,7 @@ class _LineRow extends StatelessWidget {
                     position: line.position,
                     language: language,
                     viewFromBlack: viewFromBlack,
+                    onExplore: onExplore,
                   )
                 : Text(
                     MoveNotation.pvToNotation(
@@ -404,12 +414,14 @@ class _PvMoves extends StatelessWidget {
   final Position position;
   final DisplayLanguage language;
   final bool viewFromBlack;
+  final void Function(List<String> moves, Position from, int ply)? onExplore;
 
   const _PvMoves({
     required this.pvText,
     required this.position,
     required this.language,
     this.viewFromBlack = false,
+    this.onExplore,
   });
 
   @override
@@ -447,9 +459,20 @@ class _PvMoves extends StatelessWidget {
                     ),
                   ],
                 ),
-                child: Text(
-                  steps[i].notation,
-                  style: const TextStyle(fontSize: 13),
+                child: InkWell(
+                  // Clicking walks the board to this point of the line.
+                  onTap: onExplore == null
+                      ? null
+                      : () => onExplore!(
+                          [for (final step in steps) step.uci],
+                          position,
+                          i + 1,
+                        ),
+                  borderRadius: BorderRadius.circular(3),
+                  child: Text(
+                    steps[i].notation,
+                    style: const TextStyle(fontSize: 13),
+                  ),
                 ),
               ),
           ],

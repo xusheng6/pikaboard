@@ -8,6 +8,7 @@ import '../formats/game_export.dart';
 import '../formats/game_io.dart';
 import '../engine/pikafish_engine.dart';
 import '../engine/search_info.dart';
+import '../models/explored_line.dart';
 import '../models/game.dart';
 import '../models/move_notation.dart';
 import '../models/move_rules.dart';
@@ -143,6 +144,14 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   // The piece armed from the palette while editing; the next square tapped
   // receives it.
   Piece? _palettePiece;
+
+  // An engine line being walked through. Nothing is recorded while it is set;
+  // the game is exactly where it was when the line was picked up.
+  ExploredLine? _exploring;
+
+  // The node the walked line branches from, when the game has one to graft it
+  // onto.
+  GameNode? _exploreAnchor;
 
   // Where the game was loaded from or last saved to, when that is a file we
   // can write back to.
@@ -779,6 +788,125 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     _handleSetupSecondaryTap(square);
   }
 
+  /// Walk [moves] from [from], stopping [ply] moves in.
+  ///
+  /// The moves are copied rather than followed live: the engine rewrites its
+  /// line as it searches, and reading a line that moves underfoot is worse
+  /// than useless.
+  void _exploreLine(List<String> moves, Position from, int ply) {
+    setState(() {
+      _exploring = ExploredLine(
+        start: from,
+        moves: List<String>.unmodifiable(moves),
+        index: ply,
+      );
+      // Only a node standing on the searched position can hold this line.
+      _exploreAnchor = _current.position.toFen() == from.toFen()
+          ? _current
+          : null;
+      _selectedSquare = null;
+    });
+  }
+
+  void _stepExploration(int delta) {
+    final line = _exploring;
+    if (line == null) return;
+    setState(() => _exploring = line.at(line.index + delta));
+  }
+
+  void _stopExploring() {
+    setState(() {
+      _exploring = null;
+      _exploreAnchor = null;
+    });
+  }
+
+  /// Keep the walked line, as a variation of the position it started from.
+  void _keepExploredLine() {
+    final line = _exploring;
+    final anchor = _exploreAnchor;
+    if (line == null || anchor == null) return;
+    setState(() {
+      final end = anchor.addLine(line.moves.take(line.index));
+      _exploring = null;
+      _exploreAnchor = null;
+      _current = end;
+      _fenController.text = _position.toFen();
+      _updateLastMoveHighlight();
+      _restartAnalysisIfNeeded();
+    });
+  }
+
+  /// Controls for a line being walked: where you are in it, how to move along
+  /// it, and whether to keep it.
+  Widget _explorationBanner(BuildContext context, ExploredLine line) {
+    final theme = Theme.of(context);
+    final language = widget.settings.language;
+    final next = line.nextMove;
+    final nextText = next == null
+        ? 'end of line'
+        : MoveNotation.toNotation(next, line.position, language);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.travel_explore,
+            size: 16,
+            color: theme.colorScheme.onSecondaryContainer,
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              'Engine line  ${line.index}/${line.moves.length}'
+              '${next == null ? '' : '  ·  next $nextText'}',
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          IconButton(
+            onPressed: line.canStepBack ? () => _stepExploration(-1) : null,
+            icon: const Icon(Icons.chevron_left, size: 22),
+            tooltip: 'Back one move',
+            visualDensity: VisualDensity.compact,
+          ),
+          IconButton(
+            onPressed: line.canStepForward ? () => _stepExploration(1) : null,
+            icon: const Icon(Icons.chevron_right, size: 22),
+            tooltip: 'Forward one move',
+            visualDensity: VisualDensity.compact,
+          ),
+          TextButton.icon(
+            // Only a game standing on the position the line came from can
+            // hold it.
+            onPressed: _exploreAnchor == null || line.index == 0
+                ? null
+                : _keepExploredLine,
+            icon: const Icon(Icons.playlist_add, size: 16),
+            label: const Text('Add to game'),
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+          ),
+          TextButton.icon(
+            onPressed: _stopExploring,
+            icon: const Icon(Icons.close, size: 16),
+            label: const Text('Done'),
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _setSetupMode(bool editing) {
     setState(() {
       _isSetupMode = editing;
@@ -1188,6 +1316,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   @override
   Widget build(BuildContext context) {
     final settings = widget.settings;
+    final exploring = _exploring;
     // On mobile the board fills the phone width (430 also caps it on iPad);
     // on desktop there is room to make it noticeably larger.
     final bool isDesktop =
@@ -1284,19 +1413,29 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                           SizedBox(
                             width: boardWidth,
                             child: BoardWidget(
-                              position: _position,
-                              selectedSquare: _selectedSquare,
+                              position: exploring?.position ?? _position,
+                              selectedSquare: exploring == null
+                                  ? _selectedSquare
+                                  : null,
                               // Each indicator is independently switchable
                               // in settings; when off it is not passed.
                               lastMoveFrom: settings.highlightLastMove
-                                  ? _lastMoveFrom
+                                  ? (exploring == null
+                                        ? _lastMoveFrom
+                                        : _uciSquare(exploring.lastMove, 0))
                                   : null,
                               lastMoveTo: settings.highlightLastMove
-                                  ? _lastMoveTo
+                                  ? (exploring == null
+                                        ? _lastMoveTo
+                                        : _uciSquare(exploring.lastMove, 2))
                                   : null,
                               arrows: _isSetupMode ? const [] : _boardArrows,
                               viewFromBlack: _viewFromBlack,
-                              onSquareTap: _onSquareTap,
+                              // Walking a line is read-only; the game is
+                              // untouched until the line is kept.
+                              onSquareTap: exploring == null
+                                  ? _onSquareTap
+                                  : null,
                               onSquareSecondaryTap: _isSetupMode
                                   ? _handleSetupSecondaryTap
                                   : null,
@@ -1326,45 +1465,50 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                     ),
                   ),
 
-                  // Move navigation
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          onPressed: _canGoBack ? _goToStart : null,
-                          icon: const Icon(Icons.skip_previous, size: 22),
-                          tooltip: 'Go to start',
-                        ),
-                        IconButton(
-                          onPressed: _canGoBack ? _goBack : null,
-                          icon: const Icon(Icons.chevron_left, size: 28),
-                          tooltip: 'Previous move',
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Text(
-                            '${_current.ply}/${_current.mainlineEnd.ply}',
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey,
+                  // While a line is being walked, its controls stand in for
+                  // the game's navigation.
+                  if (exploring != null)
+                    _explorationBanner(context, exploring)
+                  else
+                    // Move navigation
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          IconButton(
+                            onPressed: _canGoBack ? _goToStart : null,
+                            icon: const Icon(Icons.skip_previous, size: 22),
+                            tooltip: 'Go to start',
+                          ),
+                          IconButton(
+                            onPressed: _canGoBack ? _goBack : null,
+                            icon: const Icon(Icons.chevron_left, size: 28),
+                            tooltip: 'Previous move',
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Text(
+                              '${_current.ply}/${_current.mainlineEnd.ply}',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey,
+                              ),
                             ),
                           ),
-                        ),
-                        IconButton(
-                          onPressed: _canGoForward ? _goForward : null,
-                          icon: const Icon(Icons.chevron_right, size: 28),
-                          tooltip: 'Next move',
-                        ),
-                        IconButton(
-                          onPressed: _canGoForward ? _goToEnd : null,
-                          icon: const Icon(Icons.skip_next, size: 22),
-                          tooltip: 'Go to end',
-                        ),
-                      ],
+                          IconButton(
+                            onPressed: _canGoForward ? _goForward : null,
+                            icon: const Icon(Icons.chevron_right, size: 28),
+                            tooltip: 'Next move',
+                          ),
+                          IconButton(
+                            onPressed: _canGoForward ? _goToEnd : null,
+                            icon: const Icon(Icons.skip_next, size: 22),
+                            tooltip: 'Go to end',
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
 
                   // Controls
                   Padding(
@@ -1593,6 +1737,7 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                                   scorePerspective: settings.scorePerspective,
                                   showPreview: settings.previewOnEngineLine,
                                   viewFromBlack: _viewFromBlack,
+                                  onExplore: _exploreLine,
                                 ),
                                 if (!wide)
                                   NotesPanel(

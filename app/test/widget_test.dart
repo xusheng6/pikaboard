@@ -15,6 +15,7 @@ import 'package:app/models/move_rules.dart';
 import 'package:app/ui/board_widget.dart';
 import 'package:app/ui/hover_preview.dart';
 import 'package:app/ui/engine_output.dart';
+import 'package:app/models/explored_line.dart';
 import 'package:app/models/game.dart';
 import 'package:app/ui/move_table.dart';
 import 'package:app/ui/piece_palette.dart';
@@ -1264,6 +1265,87 @@ void main() {
 
       await tester.tapAt(Offset(rect.left + 14, rect.center.dy));
       expect(selected, 0);
+    });
+  });
+
+  group('Exploring an engine line', () {
+    test('a snapshotted line walks step by step', () {
+      final start = Position.startPosition();
+      const moves = ['h2e2', 'h9g7', 'h0g2'];
+      var line = ExploredLine(start: start, moves: moves);
+
+      expect(line.index, 0);
+      expect(line.position.toFen(), start.toFen());
+      expect(line.canStepBack, isFalse);
+      expect(line.nextMove, 'h2e2');
+      expect(line.replyMove, 'h9g7');
+
+      line = line.forward;
+      expect(line.lastMove, 'h2e2');
+      expect(
+        line.position.toFen(),
+        MoveNotation.applyUciMove(start, 'h2e2').toFen(),
+      );
+
+      line = line.at(3);
+      expect(line.canStepForward, isFalse);
+      expect(line.nextMove, isNull);
+      expect(line.lastMove, 'h0g2');
+
+      // Stepping cannot run off either end.
+      expect(line.forward.index, 3);
+      expect(line.at(-5).index, 0);
+    });
+
+    test('keeping a line grafts it onto the game as a variation', () {
+      final game = Game.fromMoves(Position.startPosition(), ['h2e2', 'h9g7']);
+      final anchor = game.root;
+
+      // A line that starts differently becomes a second branch ...
+      final end = anchor.addLine(['b0c2', 'b9c7']);
+      expect(game.root.children.length, 2);
+      expect(end.ply, 2);
+      expect(end.pathFromRoot.map((n) => n.move).skip(1), ['b0c2', 'b9c7']);
+
+      // ... while one that follows an existing move extends it instead.
+      final extended = anchor.addLine(['h2e2', 'h9g7', 'h0g2']);
+      expect(game.root.children.length, 2, reason: 'no new branch');
+      expect(extended.ply, 3);
+      expect(game.root.mainlineEnd, extended);
+    });
+
+    testWidgets('clicking a move in a line asks to walk it', (tester) async {
+      final start = Position.startPosition();
+      List<String>? walked;
+      Position? from;
+      int? ply;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AnalysisPanel(
+              lines: [
+                AnalysisLine(
+                  info: _line(12, pv: 'h2e2 h9g7 h0g2'),
+                  position: start,
+                ),
+              ],
+              position: start,
+              onExplore: (moves, position, index) {
+                walked = moves;
+                from = position;
+                ply = index;
+              },
+            ),
+          ),
+        ),
+      );
+
+      // The second move of the line: walking should stop right after it.
+      await tester.tap(find.text('马8进7'));
+      expect(walked, ['h2e2', 'h9g7', 'h0g2']);
+      expect(from!.toFen(), start.toFen());
+      expect(ply, 2);
     });
   });
 
