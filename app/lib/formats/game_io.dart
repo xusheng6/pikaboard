@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import '../models/game.dart';
 import '../models/settings.dart';
+import 'ccbridge.dart';
 import 'xqf.dart';
 import 'xqg.dart';
 
@@ -20,6 +21,8 @@ class GameIO {
   /// Extensions offered when opening a file.
   static const List<String> readableExtensions = [
     'xqf',
+    'cbl',
+    'cbr',
     nativeExtension,
     'xqg',
     'json',
@@ -29,8 +32,18 @@ class GameIO {
     String path, {
     DisplayLanguage language = DisplayLanguage.simplified,
   }) async {
+    return (await loadAll(path, language: language)).first;
+  }
+
+  /// Every game in the file at [path].
+  ///
+  /// Most formats hold one; a CCBridge library holds a whole collection.
+  static Future<List<Game>> loadAll(
+    String path, {
+    DisplayLanguage language = DisplayLanguage.simplified,
+  }) async {
     final bytes = await File(path).readAsBytes();
-    return decode(bytes, path: path, language: language);
+    return decodeAll(bytes, path: path, language: language);
   }
 
   /// Parse [bytes], choosing the format by content rather than by extension so
@@ -40,7 +53,21 @@ class GameIO {
     String path = '',
     DisplayLanguage language = DisplayLanguage.simplified,
   }) {
-    if (XqfFormat.looksLikeXqf(bytes)) return XqfFormat.parse(bytes);
+    return decodeAll(bytes, path: path, language: language).first;
+  }
+
+  /// Parse [bytes], choosing the format by content rather than by extension so
+  /// oddly-named files still open.
+  static List<Game> decodeAll(
+    Uint8List bytes, {
+    String path = '',
+    DisplayLanguage language = DisplayLanguage.simplified,
+  }) {
+    if (XqfFormat.looksLikeXqf(bytes)) return [XqfFormat.parse(bytes)];
+    if (CcbridgeFormat.looksLikeLibrary(bytes) ||
+        CcbridgeFormat.looksLikeRecord(bytes)) {
+      return CcbridgeFormat.parseAll(bytes);
+    }
 
     final Object? json;
     try {
@@ -51,9 +78,9 @@ class GameIO {
     if (json is! Map<String, dynamic>) {
       throw const FormatException('Game file is not an object');
     }
-    if (json['format'] == Game.formatId) return Game.fromJson(json);
+    if (json['format'] == Game.formatId) return [Game.fromJson(json)];
     if (XqgFormat.looksLikeXqg(json)) {
-      return XqgFormat.parse(json, language: language);
+      return [XqgFormat.parse(json, language: language)];
     }
     throw FormatException('Unsupported game format: ${json['format']}');
   }

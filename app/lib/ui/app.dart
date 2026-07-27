@@ -1114,10 +1114,20 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   }
 
   /// Load the game at [path], however it was chosen.
+  ///
+  /// A CCBridge library holds a whole collection, so more than one game may
+  /// come back; the reader picks which to open.
   Future<void> _openPath(String path) async {
     try {
-      final game = await GameIO.load(path, language: widget.settings.language);
+      final games = await GameIO.loadAll(
+        path,
+        language: widget.settings.language,
+      );
       if (!mounted) return;
+      final game = games.length == 1
+          ? games.first
+          : await _pickGame(games, path.split('/').last);
+      if (game == null || !mounted) return;
       if (_isAnalyzing) _stopAnalysis();
       setState(() {
         _loadGame(game);
@@ -1133,6 +1143,64 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text('Could not open: $e')));
     }
+  }
+
+  /// Choose one game out of a collection.
+  Future<Game?> _pickGame(List<Game> games, String fileName) {
+    return showDialog<Game>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('$fileName — ${games.length} games'),
+        content: SizedBox(
+          width: 460,
+          height: 420,
+          child: ListView.builder(
+            itemCount: games.length,
+            itemBuilder: (context, index) {
+              final game = games[index];
+              final metadata = game.metadata;
+              final players = [
+                if (metadata.red.isNotEmpty) metadata.red,
+                if (metadata.black.isNotEmpty) metadata.black,
+              ].join(' — ');
+              final detail = [
+                if (players.isNotEmpty) players,
+                if (metadata.event.isNotEmpty) metadata.event,
+                if (metadata.date.isNotEmpty) metadata.date,
+                '${game.mainlineLength} moves',
+              ].join('  ·  ');
+              return ListTile(
+                dense: true,
+                leading: Text(
+                  '${index + 1}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(dialogContext).hintColor,
+                  ),
+                ),
+                title: Text(
+                  metadata.title.isEmpty ? '(untitled)' : metadata.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  detail,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () => Navigator.pop(dialogContext, game),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Files dropped on the window open the same way picked ones do; extras are

@@ -96,7 +96,9 @@ flutter run
 pikaboard/
 ├── docs/
 │   ├── xqf-format.md          # The XQF game record format, documented
-│   └── xqf.ksy                # ... and as a Kaitai Struct definition
+│   ├── xqf.ksy                # ... and as a Kaitai Struct definition
+│   ├── ccbridge-format.md     # The CCBridge CBR/CBL formats
+│   └── ccbridge.ksy           # ... and as a Kaitai Struct definition
 ├── Pikafish/                  # Engine source (git submodule)
 ├── pikafish_bridge/
 │   ├── pikafish_bridge.h      # C-linkage API header
@@ -130,6 +132,9 @@ pikaboard/
 - [The XQF game record format](docs/xqf-format.md) — the format XQStudio
   writes, reverse engineered from its source and checked against 399 files,
   with a [Kaitai Struct definition](docs/xqf.ksy) alongside it.
+- [The CCBridge CBR / CBL formats](docs/ccbridge-format.md) — what 象棋桥
+  writes, checked against 248 games, likewise with a
+  [Kaitai definition](docs/ccbridge.ksy).
 
 ## License
 
