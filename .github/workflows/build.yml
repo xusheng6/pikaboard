@@ -72,13 +72,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The podspec compiles Pikafish's sources straight into the app.
+          # Pikafish is compiled from source into a static library the app
+          # links, so its sources have to be here.
           submodules: recursive
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: ./scripts/ci_prepare_nnue.sh
+      # Mobile reaches the engine through FFI rather than a subprocess, so the
+      # engine and its bridge are linked in as build/ios-arm64/libpikafish.a —
+      # named in ios/Flutter/Pikafish.xcconfig, and an Xcode input file, so the
+      # app cannot link without it.
+      - name: Build the Pikafish static library
+        run: ./build_pikafish.sh ios
       - run: flutter pub get
         working-directory: app
       - run: flutter build ios --no-codesign --debug
