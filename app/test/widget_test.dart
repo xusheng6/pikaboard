@@ -2,7 +2,10 @@ import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'package:app/ui/app.dart';
 
 import 'package:app/engine/search_info.dart';
 import 'package:app/models/move_notation.dart';
@@ -21,6 +24,7 @@ import 'package:app/ui/move_table.dart';
 import 'package:app/ui/piece_palette.dart';
 import 'package:app/ui/move_tree.dart';
 import 'package:app/ui/variation_list.dart';
+import 'package:app/ui/drag_handle.dart';
 import 'package:app/ui/score_chart.dart';
 
 SearchInfo _line(int depth, {int scoreCp = 0, required String pv}) {
@@ -465,6 +469,37 @@ void main() {
       expect(back.highlightLastMove, isFalse);
       expect(back.highlightBestMove, isTrue);
       expect(back.highlightPonderMove, isFalse);
+    });
+
+    test('dragged pane sizes survive a round-trip, and reset to automatic', () {
+      const s = Settings(
+        boardWidth: 720,
+        moveTableWidth: 240,
+        sidePanelWidth: 320,
+        notesFraction: 0.35,
+      );
+      final back = Settings.fromJson(s.toJson());
+      expect(back.boardWidth, 720);
+      expect(back.moveTableWidth, 240);
+      expect(back.sidePanelWidth, 320);
+      expect(back.notesFraction, 0.35);
+
+      // Everything else is carried across a layout change ...
+      final resized = s
+          .copyWith(multiPv: 3)
+          .withLayout(boardWidth: 500, notesFraction: 0.5);
+      expect(resized.multiPv, 3);
+      expect(resized.boardWidth, 500);
+      expect(resized.notesFraction, 0.5);
+      // ... and a field left out goes back to letting the layout decide,
+      // which copyWith's "null means unchanged" cannot express.
+      expect(resized.moveTableWidth, isNull);
+      expect(resized.sidePanelWidth, isNull);
+      expect(s.copyWith().boardWidth, 720);
+
+      // No sizes at all is the default, and how the settings page resets them.
+      expect(const Settings().boardWidth, isNull);
+      expect(s.withLayout().boardWidth, isNull);
     });
 
     test('settings files written before these options keep the defaults', () {
@@ -1652,6 +1687,176 @@ void main() {
         ),
       );
       expect(find.textContaining('No branches here'), findsOneWidget);
+    });
+  });
+
+  group('Keyboard navigation', () {
+    testWidgets('the arrows walk the game and Home/End jump to its ends', (
+      tester,
+    ) async {
+      // The engine cannot start under the test host; the screen carries on
+      // without it, which is all this needs.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PikaboardScreen(
+            settings: const Settings(),
+            onSettingsChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Play a move by hand: a pawn a3-a4. Red's rook on a0 and pawn on a3
+      // share a file, which gives the height of one rank.
+      final pawn = tester.getCenter(find.text('兵').first);
+      final rook = tester.getCenter(find.text('车').first);
+      final rank = (pawn.dy - rook.dy) / 3;
+      await tester.tapAt(pawn);
+      await tester.pump();
+      await tester.tapAt(pawn + Offset(0, rank));
+      await tester.pump();
+      expect(find.text('1/1'), findsOneWidget, reason: 'a move was played');
+
+      Future<void> press(LogicalKeyboardKey key) async {
+        await tester.sendKeyEvent(key);
+        await tester.pump();
+      }
+
+      await press(LogicalKeyboardKey.arrowUp);
+      expect(find.text('0/1'), findsOneWidget, reason: 'up goes back a move');
+      await press(LogicalKeyboardKey.arrowDown);
+      expect(find.text('1/1'), findsOneWidget, reason: 'down goes forward');
+
+      // Left and right do the same, and neither runs off the end of the game.
+      await press(LogicalKeyboardKey.arrowLeft);
+      expect(find.text('0/1'), findsOneWidget);
+      await press(LogicalKeyboardKey.arrowLeft);
+      expect(find.text('0/1'), findsOneWidget);
+      await press(LogicalKeyboardKey.arrowRight);
+      await press(LogicalKeyboardKey.arrowRight);
+      expect(find.text('1/1'), findsOneWidget);
+
+      await press(LogicalKeyboardKey.home);
+      expect(find.text('0/1'), findsOneWidget);
+      await press(LogicalKeyboardKey.end);
+      expect(find.text('1/1'), findsOneWidget);
+    });
+
+    testWidgets('typing a FEN keeps the arrows', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PikaboardScreen(
+            settings: const Settings(),
+            onSettingsChanged: (_) {},
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final pawn = tester.getCenter(find.text('兵').first);
+      final rook = tester.getCenter(find.text('车').first);
+      await tester.tapAt(pawn);
+      await tester.pump();
+      await tester.tapAt(pawn + Offset(0, (pawn.dy - rook.dy) / 3));
+      await tester.pump();
+      expect(find.text('1/1'), findsOneWidget);
+
+      // With the caret in the FEN box the arrows belong to the text.
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pump();
+      expect(find.text('1/1'), findsOneWidget, reason: 'the game stayed put');
+    });
+  });
+
+  group('DragHandle', () {
+    testWidgets('reports its travel, then that the drag is over', (
+      tester,
+    ) async {
+      final moves = <double>[];
+      var ended = 0, reset = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Row(
+              children: [
+                DragHandle(
+                  axis: Axis.vertical,
+                  onDrag: moves.add,
+                  onDragEnd: () => ended++,
+                  onReset: () => reset++,
+                ),
+                const Expanded(child: SizedBox()),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // Started by hand: the first movement is what convinces the recogniser
+      // this is a drag, and it is spent doing so rather than reported.
+      final handle = find.byType(DragHandle);
+      final gesture = await tester.startGesture(
+        tester.getCenter(handle),
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(const Offset(-10, 0));
+      await tester.pump();
+      moves.clear();
+
+      // From there the pointer's travel arrives as it happens.
+      await gesture.moveBy(const Offset(-30, 0));
+      await tester.pump();
+      expect(moves.fold<double>(0, (a, b) => a + b), -30);
+      expect(ended, 0, reason: 'still dragging');
+
+      await gesture.up();
+      await tester.pump();
+      expect(ended, 1);
+
+      // A double-click hands the pane back to the automatic layout.
+      await tester.tap(handle);
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(handle);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(reset, 1);
+    });
+
+    testWidgets('a horizontal bar reads vertical travel only', (tester) async {
+      final moves = <double>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                DragHandle(axis: Axis.horizontal, onDrag: moves.add),
+                const Expanded(child: SizedBox()),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      final handle = find.byType(DragHandle);
+      final gesture = await tester.startGesture(
+        tester.getCenter(handle),
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(const Offset(0, 10));
+      await tester.pump();
+      moves.clear();
+      await gesture.moveBy(const Offset(0, 25));
+      await tester.pump();
+      expect(moves.fold<double>(0, (a, b) => a + b), 25);
+
+      // Sideways movement is not travel for this bar, so nothing resizes.
+      moves.clear();
+      await gesture.moveBy(const Offset(30, 0));
+      await tester.pump();
+      expect(moves.fold<double>(0, (a, b) => a + b), 0);
+      await gesture.up();
     });
   });
 

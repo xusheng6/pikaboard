@@ -121,6 +121,17 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: (v) => _apply(_current.copyWith(highlightPonderMove: v)),
           ),
           const Divider(),
+          _sectionHeader(context, 'Layout'),
+          ListTile(
+            title: const Text('Reset panel sizes'),
+            subtitle: const Text(
+              'Put the board and the side columns back to the sizes the '
+              'window picks',
+            ),
+            trailing: const Icon(Icons.settings_backup_restore),
+            onTap: () => _apply(_current.withLayout()),
+          ),
+          const Divider(),
           _sectionHeader(context, 'Score perspective'),
           for (final s in ScorePerspective.values)
             _choice(

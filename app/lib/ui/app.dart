@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../formats/game_export.dart';
 import '../formats/game_io.dart';
 import '../engine/pikafish_engine.dart';
@@ -19,6 +20,7 @@ import '../models/settings_store.dart';
 import 'board_widget.dart';
 import 'analysis_panel.dart';
 import 'candidate_moves.dart';
+import 'drag_handle.dart';
 import 'engine_output.dart';
 import 'move_table.dart';
 import 'move_tree.dart';
@@ -162,6 +164,15 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
   // True while a file is being dragged over the window.
   bool _dragging = false;
+
+  // Pane sizes the user has dragged the splitters to, null meaning the layout
+  // picks the size itself. They are held here while a drag is in flight and
+  // written back to settings when it ends, so dragging does not rewrite the
+  // settings file on every frame.
+  double? _boardWidth;
+  double? _moveTableWidth;
+  double? _sidePanelWidth;
+  double? _notesFraction;
 
   // Whole-game analysis: how far it has got, and how to stop it.
   int? _batchDone;
@@ -421,9 +432,30 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
   @override
   void initState() {
     super.initState();
+    _readLayout(widget.settings);
     _loadGame(Game.fromPosition(Position.startPosition()));
     _initFilePicker();
     _initEngine();
+  }
+
+  /// Adopt the stored pane sizes.
+  void _readLayout(Settings s) {
+    _boardWidth = s.boardWidth;
+    _moveTableWidth = s.moveTableWidth;
+    _sidePanelWidth = s.sidePanelWidth;
+    _notesFraction = s.notesFraction;
+  }
+
+  /// Write the pane sizes back to settings, once a drag is over.
+  void _saveLayout() {
+    widget.onSettingsChanged(
+      widget.settings.withLayout(
+        boardWidth: _boardWidth,
+        moveTableWidth: _moveTableWidth,
+        sidePanelWidth: _sidePanelWidth,
+        notesFraction: _notesFraction,
+      ),
+    );
   }
 
   /// The macOS build runs unsandboxed (it spawns the engine), so the picker's
@@ -501,6 +533,14 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
         _staleLines = [];
       });
       if (_isAnalyzing) _restartSearch(_position);
+    }
+    // Layout changed elsewhere — the settings page's reset, say.
+    final now = widget.settings, was = oldWidget.settings;
+    if (now.boardWidth != was.boardWidth ||
+        now.moveTableWidth != was.moveTableWidth ||
+        now.sidePanelWidth != was.sidePanelWidth ||
+        now.notesFraction != was.notesFraction) {
+      _readLayout(now);
     }
   }
 
@@ -621,6 +661,67 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
       _lastMoveTo = null;
       _restartAnalysisIfNeeded();
     });
+  }
+
+  /// Walk the game from the keyboard: the arrows step a move at a time, Home
+  /// and End jump to either end of the line.
+  ///
+  /// While a line is being explored the same keys walk that line instead, since
+  /// that is what the board is showing.
+  ///
+  /// Keys are left alone while a text field has focus — the FEN box, a note —
+  /// so the arrows go on moving the caret there. Anything the game does not use
+  /// is passed on, leaving shortcuts and focus traversal alone.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isMetaPressed ||
+        keyboard.isControlPressed ||
+        keyboard.isAltPressed) {
+      return KeyEventResult.ignored;
+    }
+    // This handler sits below the app's text-editing shortcuts, so it would
+    // otherwise take the arrows out of a field being typed in.
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused != null &&
+        focused.findAncestorStateOfType<EditableTextState>() != null) {
+      return KeyEventResult.ignored;
+    }
+
+    final key = event.logicalKey;
+    final line = _exploring;
+    if (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowLeft) {
+      if (line == null) {
+        _goBack();
+      } else {
+        _stepExploration(-1);
+      }
+    } else if (key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.arrowRight) {
+      if (line == null) {
+        _goForward();
+      } else {
+        _stepExploration(1);
+      }
+    } else if (key == LogicalKeyboardKey.home) {
+      if (line == null) {
+        _goToStart();
+      } else {
+        _seekExploration(0);
+      }
+    } else if (key == LogicalKeyboardKey.end) {
+      if (line == null) {
+        _goToEnd();
+      } else {
+        _seekExploration(line.moves.length);
+      }
+    } else {
+      return KeyEventResult.ignored;
+    }
+    // Claimed even at the end of the game, so a key that means "move" is never
+    // also read as "move the focus".
+    return KeyEventResult.handled;
   }
 
   void _goToEnd() {
@@ -1413,6 +1514,9 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
 
   void _applyFen() {
     if (_isAnalyzing) _stopAnalysis();
+    // Let the field go, so the arrow keys go back to walking the game rather
+    // than moving the caret.
+    FocusScope.of(context).unfocus();
     final fen = _fenController.text.trim();
     if (fen.isEmpty) return;
     try {
@@ -1461,370 +1565,604 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
     // on desktop there is room to make it noticeably larger.
     final bool isDesktop =
         Platform.isMacOS || Platform.isWindows || Platform.isLinux;
-    final double maxBoardWidth = isDesktop ? 640 : 430;
+    final double autoBoardWidth = isDesktop ? 640 : 430;
+    // Splitters are only worth their space where there is a pointer to grab
+    // them with.
+    final bool resizable = isDesktop;
+    const double handleThickness = 8;
 
     return Scaffold(
-      body: _withFileDrop(
-        SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              // Cap the board's height so it shrinks to fit short windows
-              // instead of overflowing; leave room for the control rows and a
-              // usable analysis panel below. The reserve follows the text scale
-              // since those rows grow with the font size. The ceiling matches
-              // maxBoardWidth's 9:10 aspect so height, not the ceiling, is what
-              // caps a big board.
-              final textScaler = MediaQuery.textScalerOf(context);
-              final double boardMaxHeight =
-                  (constraints.maxHeight - textScaler.scale(340)).clamp(
-                    160.0,
-                    isDesktop ? 760.0 : 620.0,
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: _handleKey,
+        child: _withFileDrop(
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final textScaler = MediaQuery.textScalerOf(context);
+                // Wide windows get XQStudio's shape: board on the left, the
+                // game score beside it, notes and branches to the right.
+                final wide = constraints.maxWidth >= 980;
+
+                // Widths of the two right-hand columns, as dragged or by
+                // default. Whatever is left over is the board column's, and it
+                // is never let below boardColumnFloor: a splitter dragged too
+                // far squeezes the columns rather than the board.
+                final double boardColumnFloor = textScaler.scale(360);
+                double moveTableWidth =
+                    _moveTableWidth ?? textScaler.scale(196);
+                double sidePanelWidth =
+                    _sidePanelWidth ?? textScaler.scale(280);
+                if (wide) {
+                  final double room = math.max(
+                    120.0,
+                    constraints.maxWidth - boardColumnFloor,
                   );
-              // Wide windows get XQStudio's shape: board on the left, the
-              // game score beside it, notes and branches to the right.
-              final wide = constraints.maxWidth >= 980;
+                  if (moveTableWidth + sidePanelWidth > room) {
+                    final double shrink =
+                        room / (moveTableWidth + sidePanelWidth);
+                    moveTableWidth *= shrink;
+                    sidePanelWidth *= shrink;
+                  }
+                }
 
-              // The board keeps one size whether or not the palette is out.
-              final paletteWidth = textScaler.scale(142);
-              final available = constraints.maxWidth - 16;
-              var boardWidth = math.min(
-                math.min(maxBoardWidth, available),
-                boardMaxHeight * Position.files / Position.ranks,
-              );
-              final reservePaletteSpace =
-                  available >= boardWidth + 2 * paletteWidth;
-              if (!reservePaletteSpace && _isSetupMode) {
-                // Too narrow to reserve it: the board gives way instead.
-                boardWidth = math.min(boardWidth, available - paletteWidth);
-              }
-              final boardHeight = boardWidth * Position.ranks / Position.files;
+                // Cap the board's height so it shrinks to fit short windows
+                // instead of overflowing; leave room for the control rows and a
+                // usable analysis panel below. The reserve follows the text scale
+                // since those rows grow with the font size. A board left at its
+                // automatic size also stops at a ceiling matching
+                // autoBoardWidth's 9:10 aspect; one the user has dragged is held
+                // only by what the window can show.
+                final double boardMaxHeight =
+                    (constraints.maxHeight -
+                            textScaler.scale(300) -
+                            (resizable ? handleThickness : 0))
+                        .clamp(
+                          160.0,
+                          _boardWidth != null
+                              ? double.infinity
+                              : (isDesktop ? 760.0 : 620.0),
+                        );
 
-              final boardColumn = Column(
-                children: [
-                  // FEN input
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _fenController,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontFamily: 'monospace',
-                            ),
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 8,
-                              ),
-                              border: OutlineInputBorder(),
-                              hintText: 'FEN',
-                            ),
-                            onSubmitted: (_) => _applyFen(),
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.check, size: 20),
-                          onPressed: _applyFen,
-                          tooltip: 'Apply FEN',
-                        ),
-                      ],
-                    ),
-                  ),
+                // The board keeps one size whether or not the palette is out.
+                final paletteWidth = textScaler.scale(142);
+                final available =
+                    (wide
+                        ? constraints.maxWidth -
+                              moveTableWidth -
+                              sidePanelWidth -
+                              2 * handleThickness
+                        : constraints.maxWidth) -
+                    16;
+                var boardWidth = math.min(
+                  math.min(_boardWidth ?? autoBoardWidth, available),
+                  boardMaxHeight * Position.files / Position.ranks,
+                );
+                final reservePaletteSpace =
+                    available >= boardWidth + 2 * paletteWidth;
+                if (!reservePaletteSpace && _isSetupMode) {
+                  // Too narrow to reserve it: the board gives way instead.
+                  boardWidth = math.min(boardWidth, available - paletteWidth);
+                }
+                final boardHeight =
+                    boardWidth * Position.ranks / Position.files;
 
-                  // Board, with the piece palette beside it while editing.
-                  // The palette's width is reserved on both sides whenever
-                  // the window can spare it, so opening it does not shove the
-                  // board sideways.
-                  Center(
-                    child: SizedBox(
-                      height: boardHeight,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (reservePaletteSpace)
-                            SizedBox(width: paletteWidth),
-                          SizedBox(
-                            width: boardWidth,
-                            child: BoardWidget(
-                              position: exploring?.position ?? _position,
-                              selectedSquare: exploring == null
-                                  ? _selectedSquare
-                                  : null,
-                              // Each indicator is independently switchable
-                              // in settings; when off it is not passed.
-                              lastMoveFrom: settings.highlightLastMove
-                                  ? (exploring == null
-                                        ? _lastMoveFrom
-                                        : _uciSquare(exploring.lastMove, 0))
-                                  : null,
-                              lastMoveTo: settings.highlightLastMove
-                                  ? (exploring == null
-                                        ? _lastMoveTo
-                                        : _uciSquare(exploring.lastMove, 2))
-                                  : null,
-                              arrows: _isSetupMode ? const [] : _boardArrows,
-                              viewFromBlack: _viewFromBlack,
-                              // Walking a line is read-only; the game is
-                              // untouched until the line is kept.
-                              onSquareTap: exploring == null
-                                  ? _onSquareTap
-                                  : null,
-                              onSquareSecondaryTap: _isSetupMode
-                                  ? _handleSetupSecondaryTap
-                                  : null,
-                              language: settings.language,
-                            ),
-                          ),
-                          if (_isSetupMode)
+                // Splitter callbacks. Each starts from the size on screen, not
+                // the stored one, so a size the window is already clipping
+                // cannot leave the handle with dead travel to unwind.
+                void resizeBoard(double dy) {
+                  // The board holds its 9:10 shape, so how far the bar moved
+                  // down decides the width too.
+                  setState(() {
+                    _boardWidth =
+                        (boardWidth + dy * Position.files / Position.ranks)
+                            .clamp(220.0, math.max(220.0, available));
+                  });
+                }
+
+                void resizePane(double dx, bool moveTable) {
+                  setState(() {
+                    final double next = math.max(
+                      120.0,
+                      (moveTable ? moveTableWidth : sidePanelWidth) - dx,
+                    );
+                    if (moveTable) {
+                      _moveTableWidth = next;
+                    } else {
+                      _sidePanelWidth = next;
+                    }
+                  });
+                }
+
+                void resetPane(VoidCallback clear) {
+                  setState(clear);
+                  _saveLayout();
+                }
+
+                final boardColumn = Column(
+                  children: [
+                    // Board, with the piece palette beside it while editing.
+                    // The palette's width is reserved on both sides whenever
+                    // the window can spare it, so opening it does not shove the
+                    // board sideways.
+                    Center(
+                      child: SizedBox(
+                        height: boardHeight,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (reservePaletteSpace)
+                              SizedBox(width: paletteWidth),
                             SizedBox(
-                              width: paletteWidth,
-                              child: PiecePalette(
-                                selected: _palettePiece,
-                                hasSelectedSquare: _selectedSquare != null,
+                              width: boardWidth,
+                              child: BoardWidget(
+                                position: exploring?.position ?? _position,
+                                selectedSquare: exploring == null
+                                    ? _selectedSquare
+                                    : null,
+                                // Each indicator is independently switchable
+                                // in settings; when off it is not passed.
+                                lastMoveFrom: settings.highlightLastMove
+                                    ? (exploring == null
+                                          ? _lastMoveFrom
+                                          : _uciSquare(exploring.lastMove, 0))
+                                    : null,
+                                lastMoveTo: settings.highlightLastMove
+                                    ? (exploring == null
+                                          ? _lastMoveTo
+                                          : _uciSquare(exploring.lastMove, 2))
+                                    : null,
+                                arrows: _isSetupMode ? const [] : _boardArrows,
                                 viewFromBlack: _viewFromBlack,
+                                // Walking a line is read-only; the game is
+                                // untouched until the line is kept.
+                                onSquareTap: exploring == null
+                                    ? _onSquareTap
+                                    : null,
+                                onSquareSecondaryTap: _isSetupMode
+                                    ? _handleSetupSecondaryTap
+                                    : null,
                                 language: settings.language,
-                                onPick: (piece) =>
-                                    setState(() => _palettePiece = piece),
-                                onDelete: _deleteSelectedPiece,
-                                onClear: _clearBoard,
-                                onReset: _resetPosition,
-                                onDone: () => _setSetupMode(false),
-                              ),
-                            )
-                          else if (reservePaletteSpace)
-                            SizedBox(width: paletteWidth),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // While a line is being walked, its controls stand in for
-                  // the game's navigation.
-                  if (exploring != null)
-                    _explorationBanner(context, exploring)
-                  else
-                    // Move navigation
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconButton(
-                            onPressed: _canGoBack ? _goToStart : null,
-                            icon: const Icon(Icons.skip_previous, size: 22),
-                            tooltip: 'Go to start',
-                          ),
-                          IconButton(
-                            onPressed: _canGoBack ? _goBack : null,
-                            icon: const Icon(Icons.chevron_left, size: 28),
-                            tooltip: 'Previous move',
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            child: Text(
-                              '${_current.ply}/${_current.mainlineEnd.ply}',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: Colors.grey,
                               ),
                             ),
-                          ),
-                          IconButton(
-                            onPressed: _canGoForward ? _goForward : null,
-                            icon: const Icon(Icons.chevron_right, size: 28),
-                            tooltip: 'Next move',
-                          ),
-                          IconButton(
-                            onPressed: _canGoForward ? _goToEnd : null,
-                            icon: const Icon(Icons.skip_next, size: 22),
-                            tooltip: 'Go to end',
-                          ),
-                        ],
+                            if (_isSetupMode)
+                              SizedBox(
+                                width: paletteWidth,
+                                child: PiecePalette(
+                                  selected: _palettePiece,
+                                  hasSelectedSquare: _selectedSquare != null,
+                                  viewFromBlack: _viewFromBlack,
+                                  language: settings.language,
+                                  onPick: (piece) =>
+                                      setState(() => _palettePiece = piece),
+                                  onDelete: _deleteSelectedPiece,
+                                  onClear: _clearBoard,
+                                  onReset: _resetPosition,
+                                  onDone: () => _setSetupMode(false),
+                                ),
+                              )
+                            else if (reservePaletteSpace)
+                              SizedBox(width: paletteWidth),
+                          ],
+                        ),
                       ),
                     ),
 
-                  // Controls
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    child: Row(
-                      children: [
-                        // Single button that starts or stops the search.
-                        Expanded(
-                          child: FilledButton.icon(
-                            onPressed: !_engineReady
-                                ? null
-                                : (_isAnalyzing
-                                      ? _stopAnalysis
-                                      : _startAnalysis),
-                            icon: Icon(
-                              _isAnalyzing ? Icons.stop : Icons.play_arrow,
-                              size: 18,
+                    // Drag the bar under the board to resize it.
+                    if (resizable)
+                      Center(
+                        child: SizedBox(
+                          width: boardWidth,
+                          child: DragHandle(
+                            axis: Axis.horizontal,
+                            thickness: handleThickness,
+                            gripLength: 64,
+                            tooltip:
+                                'Drag to resize the board  ·  '
+                                'double-click to fit the window',
+                            onDrag: resizeBoard,
+                            onDragEnd: _saveLayout,
+                            onReset: () => resetPane(() => _boardWidth = null),
+                          ),
+                        ),
+                      ),
+
+                    // While a line is being walked, its controls stand in for
+                    // the game's navigation.
+                    if (exploring != null)
+                      _explorationBanner(context, exploring)
+                    else
+                      // Move navigation
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            IconButton(
+                              onPressed: _canGoBack ? _goToStart : null,
+                              icon: const Icon(Icons.skip_previous, size: 22),
+                              tooltip: 'Go to start',
                             ),
-                            label: Text(_isAnalyzing ? 'Stop' : 'Analyze'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _canPlayBestMove ? _playBestMove : null,
-                            icon: const Icon(Icons.done_all, size: 18),
-                            label: const Text('Play Best'),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        // Board transforms, next to the side-to-move indicator
-                        // they share a row with.
-                        IconButton(
-                          onPressed: () =>
-                              _transformPosition((p) => p.mirrored()),
-                          icon: const Icon(Icons.swap_horiz, size: 20),
-                          tooltip: 'Mirror left-right (a↔i)',
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        IconButton(
-                          onPressed: () =>
-                              _transformPosition((p) => p.flipped()),
-                          icon: const Icon(Icons.swap_vert, size: 20),
-                          tooltip: 'Flip up-down and swap sides',
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        // View-only rotation — the position is untouched.
-                        IconButton(
-                          onPressed: () =>
-                              setState(() => _viewFromBlack = !_viewFromBlack),
-                          icon: Icon(
-                            Icons.rotate_left,
-                            size: 20,
-                            color: _viewFromBlack
-                                ? Theme.of(context).colorScheme.primary
-                                : null,
-                          ),
-                          tooltip: _viewFromBlack
-                              ? "View from Red's side"
-                              : "View from Black's side",
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        const SizedBox(width: 4),
-                        // Side to move indicator / toggle
-                        GestureDetector(
-                          onTap: _isAnalyzing ? null : _toggleSideToMove,
-                          child: Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: _position.sideToMove == PieceColor.red
-                                  ? Colors.red
-                                  : Colors.black87,
-                              border: Border.all(color: Colors.grey.shade400),
+                            IconButton(
+                              onPressed: _canGoBack ? _goBack : null,
+                              icon: const Icon(Icons.chevron_left, size: 28),
+                              tooltip: 'Previous move',
                             ),
-                            child: Center(
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
                               child: Text(
-                                _position.sideToMove == PieceColor.red
-                                    ? 'R'
-                                    : 'B',
+                                '${_current.ply}/${_current.mainlineEnd.ply}',
                                 style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: _canGoForward ? _goForward : null,
+                              icon: const Icon(Icons.chevron_right, size: 28),
+                              tooltip: 'Next move',
+                            ),
+                            IconButton(
+                              onPressed: _canGoForward ? _goToEnd : null,
+                              icon: const Icon(Icons.skip_next, size: 22),
+                              tooltip: 'Go to end',
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    // Controls
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      child: Row(
+                        children: [
+                          // Single button that starts or stops the search.
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: !_engineReady
+                                  ? null
+                                  : (_isAnalyzing
+                                        ? _stopAnalysis
+                                        : _startAnalysis),
+                              icon: Icon(
+                                _isAnalyzing ? Icons.stop : Icons.play_arrow,
+                                size: 18,
+                              ),
+                              label: Text(_isAnalyzing ? 'Stop' : 'Analyze'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: _canPlayBestMove
+                                  ? _playBestMove
+                                  : null,
+                              icon: const Icon(Icons.done_all, size: 18),
+                              label: const Text('Play Best'),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          // Board transforms, next to the side-to-move indicator
+                          // they share a row with.
+                          IconButton(
+                            onPressed: () =>
+                                _transformPosition((p) => p.mirrored()),
+                            icon: const Icon(Icons.swap_horiz, size: 20),
+                            tooltip: 'Mirror left-right (a↔i)',
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          IconButton(
+                            onPressed: () =>
+                                _transformPosition((p) => p.flipped()),
+                            icon: const Icon(Icons.swap_vert, size: 20),
+                            tooltip: 'Flip up-down and swap sides',
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          // View-only rotation — the position is untouched.
+                          IconButton(
+                            onPressed: () => setState(
+                              () => _viewFromBlack = !_viewFromBlack,
+                            ),
+                            icon: Icon(
+                              Icons.rotate_left,
+                              size: 20,
+                              color: _viewFromBlack
+                                  ? Theme.of(context).colorScheme.primary
+                                  : null,
+                            ),
+                            tooltip: _viewFromBlack
+                                ? "View from Red's side"
+                                : "View from Black's side",
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          const SizedBox(width: 4),
+                          // Side to move indicator / toggle
+                          GestureDetector(
+                            onTap: _isAnalyzing ? null : _toggleSideToMove,
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _position.sideToMove == PieceColor.red
+                                    ? Colors.red
+                                    : Colors.black87,
+                                border: Border.all(color: Colors.grey.shade400),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  _position.sideToMove == PieceColor.red
+                                      ? 'R'
+                                      : 'B',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
 
-                  // Secondary controls
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Row(
-                      children: [
-                        TextButton.icon(
-                          onPressed: _isAnalyzing ? null : _resetPosition,
-                          icon: const Icon(Icons.restart_alt, size: 18),
-                          label: const Text('New'),
-                        ),
-                        IconButton(
-                          onPressed: _openGameFile,
-                          icon: const Icon(Icons.folder_open, size: 18),
-                          tooltip: 'Open game (.XQF or .pbg)',
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        IconButton(
-                          onPressed: _saveGameFile,
-                          icon: const Icon(Icons.save_outlined, size: 18),
-                          tooltip: 'Save game',
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        PopupMenuButton<String>(
-                          icon: const Icon(Icons.ios_share, size: 18),
-                          tooltip: 'Export',
-                          onSelected: (choice) => _exportGame(choice == 'html'),
-                          itemBuilder: (context) => const [
-                            PopupMenuItem(
-                              value: 'txt',
-                              child: Text('Export text…'),
+                    // Secondary controls
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        children: [
+                          TextButton.icon(
+                            onPressed: _isAnalyzing ? null : _resetPosition,
+                            icon: const Icon(Icons.restart_alt, size: 18),
+                            label: const Text('New'),
+                          ),
+                          IconButton(
+                            onPressed: _openGameFile,
+                            icon: const Icon(Icons.folder_open, size: 18),
+                            tooltip: 'Open game (.XQF or .pbg)',
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          IconButton(
+                            onPressed: _saveGameFile,
+                            icon: const Icon(Icons.save_outlined, size: 18),
+                            tooltip: 'Save game',
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          PopupMenuButton<String>(
+                            icon: const Icon(Icons.ios_share, size: 18),
+                            tooltip: 'Export',
+                            onSelected: (choice) =>
+                                _exportGame(choice == 'html'),
+                            itemBuilder: (context) => const [
+                              PopupMenuItem(
+                                value: 'txt',
+                                child: Text('Export text…'),
+                              ),
+                              PopupMenuItem(
+                                value: 'html',
+                                child: Text('Export HTML with diagrams…'),
+                              ),
+                            ],
+                          ),
+                          IconButton(
+                            onPressed: _editGameInfo,
+                            icon: const Icon(Icons.info_outline, size: 18),
+                            tooltip: 'Game information',
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          TextButton.icon(
+                            onPressed: _isAnalyzing
+                                ? null
+                                : () => _setSetupMode(!_isSetupMode),
+                            icon: Icon(
+                              _isSetupMode ? Icons.check : Icons.edit,
+                              size: 18,
                             ),
-                            PopupMenuItem(
-                              value: 'html',
-                              child: Text('Export HTML with diagrams…'),
+                            label: Text(_isSetupMode ? 'Done' : 'Setup'),
+                          ),
+                          // FEN shares this row rather than holding one of its
+                          // own, which leaves the board that much more height.
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: _fenController,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                              ),
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                border: OutlineInputBorder(),
+                                hintText: 'FEN',
+                              ),
+                              onSubmitted: (_) => _applyFen(),
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: _applyFen,
+                            icon: const Icon(Icons.check, size: 18),
+                            tooltip: 'Apply FEN',
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          IconButton(
+                            onPressed: _openSettings,
+                            icon: const Icon(Icons.settings, size: 20),
+                            tooltip: 'Settings',
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const Divider(height: 1),
+
+                    // Move list, for narrow windows where there is no column
+                    // beside the board to hold it.
+                    if (!wide && _game.root.children.isNotEmpty)
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: textScaler.scale(96),
+                        ),
+                        child: MoveTree(
+                          game: _game,
+                          current: _current,
+                          language: settings.language,
+                          onSelect: _goToNode,
+                          onDelete: _deleteNode,
+                          onPromote: _promoteNode,
+                          showPreview: settings.previewOnMoveTree,
+                          viewFromBlack: _viewFromBlack,
+                          scoreLabelFor: (node) {
+                            final sample = _evalByFen[node.position.toFen()];
+                            return sample == null
+                                ? null
+                                : scoreLabel(sample.cp);
+                          },
+                        ),
+                      ),
+                    if (!wide && _game.root.children.isNotEmpty)
+                      const Divider(height: 1),
+
+                    // Engine analysis and cloud candidates in separate tabs
+                    Expanded(
+                      child: DefaultTabController(
+                        // Notes live in the right-hand column when there is one.
+                        length: wide ? 4 : 5,
+                        child: Column(
+                          children: [
+                            TabBar(
+                              isScrollable: true,
+                              tabAlignment: TabAlignment.center,
+                              tabs: [
+                                const Tab(text: 'Engine'),
+                                if (!wide) const Tab(text: 'Notes'),
+                                const Tab(text: 'Cloud'),
+                                const Tab(text: 'Raw'),
+                                const Tab(text: 'Score'),
+                              ],
+                            ),
+                            Expanded(
+                              child: TabBarView(
+                                children: [
+                                  // Scrolls internally so its stats row can stay
+                                  // pinned to the bottom.
+                                  AnalysisPanel(
+                                    lines: _analysisLines,
+                                    // While the search runs there is no bestmove
+                                    // yet, so show the PV's current best/reply.
+                                    bestMove:
+                                        _latestBestMove ??
+                                        (_bestUci == null
+                                            ? null
+                                            : BestMove(
+                                                move: _bestUci!,
+                                                ponder: _ponderUci,
+                                              )),
+                                    position: _enginePosition ?? _position,
+                                    bestMoveStale: !_engineMatchesBoard,
+                                    language: settings.language,
+                                    scorePerspective: settings.scorePerspective,
+                                    showPreview: settings.previewOnEngineLine,
+                                    viewFromBlack: _viewFromBlack,
+                                    onExplore: _exploreLine,
+                                  ),
+                                  if (!wide)
+                                    NotesPanel(
+                                      node: _current,
+                                      language: settings.language,
+                                      onChanged: (text) => setState(
+                                        () => _current.comment = text,
+                                      ),
+                                    ),
+                                  SingleChildScrollView(
+                                    child: CandidateMoves(
+                                      position: _position,
+                                      language: widget.settings.language,
+                                      scorePerspective:
+                                          widget.settings.scorePerspective,
+                                      onPlay: _playUci,
+                                    ),
+                                  ),
+                                  EngineOutputView(log: _engineLog),
+                                  ScoreChart(
+                                    points: _scorePoints,
+                                    currentPly: _current.ply,
+                                    onSelect: _goToPly,
+                                    onAnalyseGame: _engineReady
+                                        ? _analyseWholeGame
+                                        : null,
+                                    onCancelAnalysis: _cancelWholeGameAnalysis,
+                                    analysedCount: _batchDone,
+                                    analysisTotal: _batchTotal,
+                                    showPreview: settings.previewOnChart,
+                                    language: settings.language,
+                                    viewFromBlack: _viewFromBlack,
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
-                        IconButton(
-                          onPressed: _editGameInfo,
-                          icon: const Icon(Icons.info_outline, size: 18),
-                          tooltip: 'Game information',
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        TextButton.icon(
-                          onPressed: _isAnalyzing
-                              ? null
-                              : () => _setSetupMode(!_isSetupMode),
-                          icon: Icon(
-                            _isSetupMode ? Icons.check : Icons.edit,
-                            size: 18,
-                          ),
-                          label: Text(_isSetupMode ? 'Done' : 'Setup'),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          onPressed: _openSettings,
-                          icon: const Icon(Icons.settings, size: 20),
-                          tooltip: 'Settings',
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const Divider(height: 1),
-
-                  // Move list, for narrow windows where there is no column
-                  // beside the board to hold it.
-                  if (!wide && _game.root.children.isNotEmpty)
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight: textScaler.scale(96),
                       ),
-                      child: MoveTree(
-                        game: _game,
+                    ),
+
+                    // Engine status
+                    if (!_engineReady)
+                      const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            SizedBox(width: 8),
+                            Text('Loading engine...'),
+                          ],
+                        ),
+                      ),
+                  ],
+                );
+
+                if (!wide) return boardColumn;
+
+                final notesFraction = (_notesFraction ?? 0.6).clamp(0.15, 0.85);
+                final notesFlex = (notesFraction * 1000).round();
+
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: boardColumn),
+                    DragHandle(
+                      axis: Axis.vertical,
+                      thickness: handleThickness,
+                      tooltip:
+                          'Drag to resize the move list  ·  '
+                          'double-click to reset',
+                      onDrag: (dx) => resizePane(dx, true),
+                      onDragEnd: _saveLayout,
+                      onReset: () => resetPane(() => _moveTableWidth = null),
+                    ),
+                    SizedBox(
+                      width: moveTableWidth,
+                      child: MoveTable(
+                        line: _line,
                         current: _current,
                         language: settings.language,
                         onSelect: _goToNode,
-                        onDelete: _deleteNode,
-                        onPromote: _promoteNode,
                         showPreview: settings.previewOnMoveTree,
                         viewFromBlack: _viewFromBlack,
                         scoreLabelFor: (node) {
@@ -1833,164 +2171,66 @@ class _PikaboardScreenState extends State<PikaboardScreen> {
                         },
                       ),
                     ),
-                  if (!wide && _game.root.children.isNotEmpty)
-                    const Divider(height: 1),
-
-                  // Engine analysis and cloud candidates in separate tabs
-                  Expanded(
-                    child: DefaultTabController(
-                      // Notes live in the right-hand column when there is one.
-                      length: wide ? 4 : 5,
+                    DragHandle(
+                      axis: Axis.vertical,
+                      thickness: handleThickness,
+                      tooltip:
+                          'Drag to resize the notes column  ·  '
+                          'double-click to reset',
+                      onDrag: (dx) => resizePane(dx, false),
+                      onDragEnd: _saveLayout,
+                      onReset: () => resetPane(() => _sidePanelWidth = null),
+                    ),
+                    SizedBox(
+                      width: sidePanelWidth,
                       child: Column(
                         children: [
-                          TabBar(
-                            isScrollable: true,
-                            tabAlignment: TabAlignment.center,
-                            tabs: [
-                              const Tab(text: 'Engine'),
-                              if (!wide) const Tab(text: 'Notes'),
-                              const Tab(text: 'Cloud'),
-                              const Tab(text: 'Raw'),
-                              const Tab(text: 'Score'),
-                            ],
+                          Expanded(
+                            flex: notesFlex,
+                            child: NotesPanel(
+                              node: _current,
+                              language: settings.language,
+                              onChanged: (text) =>
+                                  setState(() => _current.comment = text),
+                            ),
+                          ),
+                          DragHandle(
+                            axis: Axis.horizontal,
+                            thickness: handleThickness,
+                            tooltip:
+                                'Drag to split notes and variations  ·  '
+                                'double-click to reset',
+                            onDrag: (dy) => setState(() {
+                              _notesFraction =
+                                  (notesFraction +
+                                          dy /
+                                              math.max(
+                                                1.0,
+                                                constraints.maxHeight,
+                                              ))
+                                      .clamp(0.15, 0.85);
+                            }),
+                            onDragEnd: _saveLayout,
+                            onReset: () =>
+                                resetPane(() => _notesFraction = null),
                           ),
                           Expanded(
-                            child: TabBarView(
-                              children: [
-                                // Scrolls internally so its stats row can stay
-                                // pinned to the bottom.
-                                AnalysisPanel(
-                                  lines: _analysisLines,
-                                  // While the search runs there is no bestmove
-                                  // yet, so show the PV's current best/reply.
-                                  bestMove:
-                                      _latestBestMove ??
-                                      (_bestUci == null
-                                          ? null
-                                          : BestMove(
-                                              move: _bestUci!,
-                                              ponder: _ponderUci,
-                                            )),
-                                  position: _enginePosition ?? _position,
-                                  bestMoveStale: !_engineMatchesBoard,
-                                  language: settings.language,
-                                  scorePerspective: settings.scorePerspective,
-                                  showPreview: settings.previewOnEngineLine,
-                                  viewFromBlack: _viewFromBlack,
-                                  onExplore: _exploreLine,
-                                ),
-                                if (!wide)
-                                  NotesPanel(
-                                    node: _current,
-                                    language: settings.language,
-                                    onChanged: (text) =>
-                                        setState(() => _current.comment = text),
-                                  ),
-                                SingleChildScrollView(
-                                  child: CandidateMoves(
-                                    position: _position,
-                                    language: widget.settings.language,
-                                    scorePerspective:
-                                        widget.settings.scorePerspective,
-                                    onPlay: _playUci,
-                                  ),
-                                ),
-                                EngineOutputView(log: _engineLog),
-                                ScoreChart(
-                                  points: _scorePoints,
-                                  currentPly: _current.ply,
-                                  onSelect: _goToPly,
-                                  onAnalyseGame: _engineReady
-                                      ? _analyseWholeGame
-                                      : null,
-                                  onCancelAnalysis: _cancelWholeGameAnalysis,
-                                  analysedCount: _batchDone,
-                                  analysisTotal: _batchTotal,
-                                  showPreview: settings.previewOnChart,
-                                  language: settings.language,
-                                  viewFromBlack: _viewFromBlack,
-                                ),
-                              ],
+                            flex: 1000 - notesFlex,
+                            child: VariationList(
+                              current: _current,
+                              language: settings.language,
+                              onSelect: _goToNode,
+                              onPromote: _promoteNode,
+                              onDelete: _deleteNode,
                             ),
                           ),
                         ],
                       ),
                     ),
-                  ),
-
-                  // Engine status
-                  if (!_engineReady)
-                    const Padding(
-                      padding: EdgeInsets.all(8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          SizedBox(width: 8),
-                          Text('Loading engine...'),
-                        ],
-                      ),
-                    ),
-                ],
-              );
-
-              if (!wide) return boardColumn;
-
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(child: boardColumn),
-                  const VerticalDivider(width: 1),
-                  SizedBox(
-                    width: textScaler.scale(196),
-                    child: MoveTable(
-                      line: _line,
-                      current: _current,
-                      language: settings.language,
-                      onSelect: _goToNode,
-                      showPreview: settings.previewOnMoveTree,
-                      viewFromBlack: _viewFromBlack,
-                      scoreLabelFor: (node) {
-                        final sample = _evalByFen[node.position.toFen()];
-                        return sample == null ? null : scoreLabel(sample.cp);
-                      },
-                    ),
-                  ),
-                  const VerticalDivider(width: 1),
-                  SizedBox(
-                    width: textScaler.scale(280),
-                    child: Column(
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: NotesPanel(
-                            node: _current,
-                            language: settings.language,
-                            onChanged: (text) =>
-                                setState(() => _current.comment = text),
-                          ),
-                        ),
-                        const Divider(height: 1),
-                        Expanded(
-                          flex: 2,
-                          child: VariationList(
-                            current: _current,
-                            language: settings.language,
-                            onSelect: _goToNode,
-                            onPromote: _promoteNode,
-                            onDelete: _deleteNode,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
+                  ],
+                );
+              },
+            ),
           ),
         ),
       ),

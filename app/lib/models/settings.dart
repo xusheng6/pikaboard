@@ -65,6 +65,21 @@ class Settings {
   /// How many lines the engine reports per iteration (UCI MultiPV).
   final int multiPv;
 
+  /// Board width in logical pixels, as dragged by the user. Null lets the
+  /// layout pick the size that fits the window.
+  final double? boardWidth;
+
+  /// Width of the game-score column in the wide layout; null for the default.
+  final double? moveTableWidth;
+
+  /// Width of the notes/variations column in the wide layout; null for the
+  /// default.
+  final double? sidePanelWidth;
+
+  /// Share of that column's height given to the notes pane, 0..1; null for the
+  /// default split.
+  final double? notesFraction;
+
   const Settings({
     this.theme = ThemeSetting.dark,
     this.language = DisplayLanguage.simplified,
@@ -78,6 +93,10 @@ class Settings {
     this.previewOnMoveTree = true,
     this.previewOnEngineLine = true,
     this.multiPv = 1,
+    this.boardWidth,
+    this.moveTableWidth,
+    this.sidePanelWidth,
+    this.notesFraction,
   });
 
   Settings copyWith({
@@ -107,6 +126,38 @@ class Settings {
       previewOnMoveTree: previewOnMoveTree ?? this.previewOnMoveTree,
       previewOnEngineLine: previewOnEngineLine ?? this.previewOnEngineLine,
       multiPv: multiPv ?? this.multiPv,
+      boardWidth: boardWidth,
+      moveTableWidth: moveTableWidth,
+      sidePanelWidth: sidePanelWidth,
+      notesFraction: notesFraction,
+    );
+  }
+
+  /// Replace the draggable pane sizes wholesale. Unlike [copyWith], a null
+  /// field here means "back to the automatic size", so a pane can be reset.
+  Settings withLayout({
+    double? boardWidth,
+    double? moveTableWidth,
+    double? sidePanelWidth,
+    double? notesFraction,
+  }) {
+    return Settings(
+      theme: theme,
+      language: language,
+      scorePerspective: scorePerspective,
+      fontSize: fontSize,
+      highlightLastMove: highlightLastMove,
+      highlightBestMove: highlightBestMove,
+      highlightPonderMove: highlightPonderMove,
+      enforceRules: enforceRules,
+      previewOnChart: previewOnChart,
+      previewOnMoveTree: previewOnMoveTree,
+      previewOnEngineLine: previewOnEngineLine,
+      multiPv: multiPv,
+      boardWidth: boardWidth,
+      moveTableWidth: moveTableWidth,
+      sidePanelWidth: sidePanelWidth,
+      notesFraction: notesFraction,
     );
   }
 
@@ -123,6 +174,10 @@ class Settings {
     'previewOnMoveTree': previewOnMoveTree,
     'previewOnEngineLine': previewOnEngineLine,
     'multiPv': multiPv,
+    'boardWidth': boardWidth,
+    'moveTableWidth': moveTableWidth,
+    'sidePanelWidth': sidePanelWidth,
+    'notesFraction': notesFraction,
   };
 
   factory Settings.fromJson(Map<String, dynamic> json) {
@@ -159,6 +214,12 @@ class Settings {
       // Clamped: the engine accepts up to 128, but the panel is not the place
       // to read a hundred lines.
       multiPv: ((json['multiPv'] as num?)?.toInt() ?? d.multiPv).clamp(1, 8),
+      // Sizes from an older window can be wider than the current one; the
+      // layout clamps them again to what fits before using them.
+      boardWidth: (json['boardWidth'] as num?)?.toDouble(),
+      moveTableWidth: (json['moveTableWidth'] as num?)?.toDouble(),
+      sidePanelWidth: (json['sidePanelWidth'] as num?)?.toDouble(),
+      notesFraction: (json['notesFraction'] as num?)?.toDouble(),
     );
   }
 }
